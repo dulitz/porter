@@ -1,0 +1,5 @@
+pyenv/
+PRIVATE/
+__pycache__/
+*.swp
+*~

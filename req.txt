@@ -1,0 +1,7 @@
+# pip requirements file for porter
+#
+# pip install -r req.txt
+
+PyYAML
+prometheus_client
+python-aqi
