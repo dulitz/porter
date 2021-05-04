@@ -1,53 +1,33 @@
+# porter.py
+#
+# uses the multi-target exporter pattern
+# (https://prometheus.io/docs/guides/multi-target-exporter/)
+# to connect various external services to Prometheus.
+#
+# the main advantage of this pattern is that the data is current at the time Prometheus
+# issues the query. also you can control the frequency of queries, and what is queried,
+# by editing only the Prometheus configuration. this exporter can just run forever in a
+# container.
+#
+# currently supports PurpleAir and Ambient Weather.
 
-import copy, prometheus_client, time, yaml
+import prometheus_client, time, yaml
 
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import purpleair
+import ambientweather, purpleair
 from prometheus import start_wsgi_server
 
+# /probe&target=80845&module=purpleair
 
 # see https://github.com/prometheus/client_python#custom-collectors
 
-# we should also serve /metrics from prometheus_client directly
-#      - requests and latency for PurpleAir, AmbientWeather, Neurio
-#
-# and / that contains a form for /probe along with recent statuses,
-#
-# and /config to dump the configuration
+# TODO: response code histograms
+# TODO: serve / with form for /probe along with recent statuses
+# TODO: serve /config to dump the configuration
+# TODO: use more of the config file
 
-def registry_view_factory(parent, path, params):
-    if not path.startswith('/probe'):
-        return parent
-    class ViewRestrictedRegistry(object):
-        def __init__(self, parent, path, params):
-            self.parent, self.path, self.params = parent, path, params
-        def collect(self):
-            collectors = None
-            ti = None
-            with parent._lock:
-                collectors = copy.copy(parent._collector_to_names)
-                if parent._target_info:
-                    ti = parent._target_info_metric()
-            if ti:
-                yield ti
-
-            for collector in collectors:
-                collect2_func = None
-                try:
-                    collect2_func = collector.collect2
-                except AttributeError:
-                    pass
-                if collect2_func:
-                    for metric in collector.collect2(path, params):
-                        yield metric
-                else:
-                    for metric in collector.collect():
-                        yield metric
-    return ViewRestrictedRegistry(parent, path, params)
-
-# our request will be /probe?target=http://prometheus.io&module=neurio
 
 class ProbeCollector(object):
     def __init__(self, config):
@@ -57,7 +37,7 @@ class ProbeCollector(object):
         return iter([])
         
     def collect2(self, path, params):
-        targets = params.get('target')
+        targets = params.get('target', [])
         rawmodule = params.get('module')
         module = rawmodule[0] if rawmodule and len(rawmodule) == 1 else ''
         if module and path.startswith('/probe'):
@@ -65,10 +45,12 @@ class ProbeCollector(object):
                 for target in targets:
                     for metric in purpleair.collect(self.config, target):
                         yield metric
-            elif module == 'neurio' or module == 'pwrview':
-                self.collectNeurio(target)
             elif module == 'ambientweather':
-                self.collectAmbientWeather(target)
+                for target in targets:
+                    for metric in ambientweather.collect(self.config, target):
+                        yield metric
+            elif module == 'neurio' or module == 'pwrview':
+                pass
             else:
                 print('unknown module %s' % (params))
                 yield GaugeMetricFamily('ignore', 'ignore')
@@ -76,13 +58,6 @@ class ProbeCollector(object):
             print('unknown request %s %s' % (path, params))
             yield GaugeMetricFamily('ignore', 'ignore')
 
-    def collectNeurio(self, target):
-        pass
-
-    def collectAmbientWeather(self, target):
-        pass
-
-# config holds API keys for AmbientWeather
 
 class Porter:
     def __init__(self, config):
@@ -93,7 +68,8 @@ class Porter:
         if not port:
             port = self.config.get('port', 8000)
         print('serving on port %d' % port)
-        start_wsgi_server(port, registry_view_factory=registry_view_factory)        
+        start_wsgi_server(port)
+
 
 def main(args):
     configfile = 'porter.yml'
@@ -101,14 +77,17 @@ def main(args):
         configfile = args[1]
 
     config = yaml.safe_load(open(configfile, 'rt')) or {}
+    if config:
+        print('using configuration file %s' % configfile)
+    else:
+        print('configuration file %s was empty; ignored' % configfile)
     p = Porter(config)
     p.start_wsgi_server()
 
     while True:
         time.sleep(1)
 
+
 if __name__ == '__main__':
     import sys
     sys.exit(main(sys.argv))
-
-# /probe&target=80845&module=purpleair

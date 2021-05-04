@@ -2,7 +2,7 @@
 
 from __future__ import unicode_literals
 
-import threading
+import copy, threading
 
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -10,6 +10,37 @@ from wsgiref.simple_server import make_server, WSGIRequestHandler, WSGIServer
 
 from prometheus_client.registry import REGISTRY
 from prometheus_client.exposition import choose_encoder
+
+
+def registry_view_factory(parent, path, params):
+    if not path.startswith('/probe'):
+        return parent
+    class ViewRestrictedRegistry(object):
+        def __init__(self, parent, path, params):
+            self.parent, self.path, self.params = parent, path, params
+        def collect(self):
+            collectors = None
+            ti = None
+            with parent._lock:
+                collectors = copy.copy(parent._collector_to_names)
+                if parent._target_info:
+                    ti = parent._target_info_metric()
+            if ti:
+                yield ti
+
+            for collector in collectors:
+                collect2_func = None
+                try:
+                    collect2_func = collector.collect2
+                except AttributeError:
+                    pass
+                if collect2_func:
+                    for metric in collector.collect2(path, params):
+                        yield metric
+                else:
+                    for metric in collector.collect():
+                        yield metric
+    return ViewRestrictedRegistry(parent, path, params)
 
 
 def _bake_output(registry, accept_header, path, params, registry_view_factory):
@@ -23,7 +54,7 @@ def _bake_output(registry, accept_header, path, params, registry_view_factory):
     return str('200 OK'), (str('Content-Type'), content_type), output
 
 
-def make_wsgi_app(registry=REGISTRY, registry_view_factory=None):
+def make_wsgi_app(registry=REGISTRY, registry_view_factory=registry_view_factory):
     """Create a WSGI app which serves the metrics from a registry."""
 
     def prometheus_app(environ, start_response):
@@ -69,7 +100,7 @@ class _SilentHandler(WSGIRequestHandler):
     def log_message(self, format, *args):
         """Log nothing."""
 
-def start_wsgi_server(port, addr='', registry=REGISTRY, registry_view_factory=None):
+def start_wsgi_server(port, addr='', registry=REGISTRY, registry_view_factory=registry_view_factory):
     """Starts a WSGI server for prometheus metrics as a daemon thread."""
     app = make_wsgi_app(registry, registry_view_factory)
     httpd = make_server(addr, port, app, ThreadingWSGIServer, handler_class=_SilentHandler)

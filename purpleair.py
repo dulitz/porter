@@ -13,7 +13,7 @@
 
 import aqi, json, requests, prometheus_client, time
 
-from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+from prometheus_client.core import GaugeMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('purpleair_processing_seconds',
                                          'time of purpleair requests')
@@ -68,7 +68,7 @@ def collect(config, target):
 
         temp_f = sensor.get("temp_f")
         if temp_f:
-            tempc_gauge.add_metric([sensor_id, name], round((float(temp_f)-32)*(5/9), 1))
+            tempc_gauge.add_metric([sensor_id, name], round((float(temp_f)-32)*5/9, 1))
         pressure = sensor.get("pressure")
         if pressure:
             pressure_gauge.add_metric([sensor_id, name], float(pressure))
@@ -77,8 +77,3 @@ def collect(config, target):
             humidity_gauge.add_metric([sensor_id, name], float(humidity))
         
     return gauges
-
-# c = CounterMetricFamily('my_counter_total', 'Help text', labels=['foo'])
-# c.add_metric(['bar'], 1.7)
-# c.add_metric(['baz'], 3.8)
-# yield c
