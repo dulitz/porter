@@ -1,0 +1,6 @@
+port: 8000
+
+#ambientweather:
+   #applicationKey: a07...
+   #apiKeys:
+   #- e9...

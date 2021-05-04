@@ -28,17 +28,16 @@ def collect(config, target):
         if labels is None:
             labels = ['macAddress', 'name']
         gmf = GaugeMetricFamily(metric, desc, labels=labels)
-        gauges.append(gmf)
+        metric_to_gauge[metric] = gmf
         return gmf
 
     for apikey in awconfig['apiKeys']:
         resp = requests.get("https://api.ambientweather.net/v1/devices?applicationKey={}&apiKey={}".format(awconfig['applicationKey'], apikey))
-        if resp.status_code != 200:
-            raise Exception("got {} response from {}".format(resp.status_code, resp.url))
+        resp.raise_for_status()
 
         for sensor in resp.json(): # may raise ValueError
             macaddress = sensor.get('macAddress')
-            name = sensor.get(info, {}).get('name', '')
+            name = sensor.get('info', {}).get('name', '')
             labels = [macaddress, name]
             for (k, v) in sensor.get('lastData', {}).items():
                 if k == 'winddir':
@@ -58,22 +57,24 @@ def collect(config, target):
                     g.add_metric(labels, float(v))
                 elif k.startswith('humidity'):
                     suffix = k[8:]
-                    g = makegauge('ambientweather_humidity_sensor%s_pct' % suffix, '% relative humidity at sensor %s' % suffix)
+                    g = makegauge('ambientweather_humidity_%s_pct' % suffix, '%% relative humidity at sensor %s' % suffix)
                     g.add_metric(labels, float(v))
                 elif k.startswith('batt'):
                     suffix = k[4:]
-                    g = makegauge('ambientweather_battery_good' % suffix, '1 if battery %s is good' % suffix)
+                    g = makegauge('ambientweather_battery_%s_good' % suffix, '1 if battery %s is good' % suffix)
                     g.add_metric(labels, int(v))
                 elif k == 'tempf':
-                    g = makegauge('ambientweather_outdoor_temp_c' % suffix, 'outdoor temp (degrees C)' % suffix)
+                    g = makegauge('ambientweather_outdoor_temp_c', 'outdoor temp (degrees C)')
                     g.add_metric(labels, round((float(v)-32)*5/9, 1))
                 elif k == 'tempinf':
-                    g = makegauge('ambientweather_indoor_temp_c' % suffix, 'indoor temp (degrees C)' % suffix)
+                    g = makegauge('ambientweather_indoor_temp_c', 'indoor temp (degrees C)')
                     g.add_metric(labels, round((float(v)-32)*5/9, 1))
                 elif k.startswith('temp'):
                     suffix = k[4:]
-                    g = makegauge('ambientweather_temp_sensor%s_c' % suffix, 'temperature at sensor %s (degrees C)' % suffix)
-                    g.add_metric(labels, int(v))
+                    if suffix.endswith('f'):
+                        suffix = suffix[:len(suffix)-1]
+                    g = makegauge('ambientweather_temp_%s_c' % suffix, 'temperature at sensor %s (degrees C)' % suffix)
+                    g.add_metric(labels, round((float(v)-32)*5/9, 1))
                 elif k == 'co2':
                     g = makegauge('ambientweather_indoor_co2_ppm', 'indoor CO2 concentration (ppm)')
                     g.add_metric(labels, float(v))
@@ -91,6 +92,5 @@ def collect(config, target):
                     g.add_metric(labels, float(v))
                 else:
                     pass
-                    tempc_gauge.add_metric([sensor_id, name], round((float(temp_f)-32)*(5/9), 1))
         
     return metric_to_gauge.values()

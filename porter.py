@@ -11,7 +11,7 @@
 #
 # currently supports PurpleAir and Ambient Weather.
 
-import prometheus_client, time, yaml
+import json, prometheus_client, requests, time, yaml
 
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
@@ -24,6 +24,7 @@ from prometheus import start_wsgi_server
 # see https://github.com/prometheus/client_python#custom-collectors
 
 # TODO: response code histograms
+# TODO: histograms of exceptions at top level
 # TODO: serve / with form for /probe along with recent statuses
 # TODO: serve /config to dump the configuration
 # TODO: use more of the config file
@@ -41,19 +42,24 @@ class ProbeCollector(object):
         rawmodule = params.get('module')
         module = rawmodule[0] if rawmodule and len(rawmodule) == 1 else ''
         if module and path.startswith('/probe'):
-            if module == 'purpleair':
-                for target in targets:
-                    for metric in purpleair.collect(self.config, target):
-                        yield metric
-            elif module == 'ambientweather':
-                for target in targets:
-                    for metric in ambientweather.collect(self.config, target):
-                        yield metric
-            elif module == 'neurio' or module == 'pwrview':
-                pass
-            else:
-                print('unknown module %s' % (params))
-                yield GaugeMetricFamily('ignore', 'ignore')
+            try:
+                if module == 'purpleair':
+                    for target in targets:
+                        for metric in purpleair.collect(self.config, target):
+                            yield metric
+                elif module == 'ambientweather':
+                    for target in targets:
+                        for metric in ambientweather.collect(self.config, target):
+                            yield metric
+                elif module == 'neurio' or module == 'pwrview':
+                    pass
+                else:
+                    print('unknown module %s' % (params))
+                    yield GaugeMetricFamily('ignore', 'ignore')
+            except json.JSONDecodeError:
+                raise
+            except requests.exceptions.HTTPError:
+                raise
         else:
             print('unknown request %s %s' % (path, params))
             yield GaugeMetricFamily('ignore', 'ignore')
@@ -62,11 +68,14 @@ class ProbeCollector(object):
 class Porter:
     def __init__(self, config):
         self.config = config
+        port = self.config.get('port')
+        if not port:
+            self.config['port'] = 8000
         REGISTRY.register(ProbeCollector(config))
 
     def start_wsgi_server(self, port=0):
         if not port:
-            port = self.config.get('port', 8000)
+            port = self.config['port']
         print('serving on port %d' % port)
         start_wsgi_server(port)
 

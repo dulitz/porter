@@ -22,8 +22,7 @@ REQUEST_TIME = prometheus_client.Summary('purpleair_processing_seconds',
 def collect(config, target):
     # FIXME: ?? does target need to be munged to remove anything?
     resp = requests.get("https://www.purpleair.com/json?show={}".format(target))
-    if resp.status_code != 200:
-        raise Exception("got {} response code from purpleair".format(resp.status_code))
+    resp.raise_for_status()
 
     gauges = []
     def makegauge(metric, desc, labels=None):
