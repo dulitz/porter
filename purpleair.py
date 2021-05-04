@@ -4,6 +4,12 @@
 #
 # see https://www2.purpleair.com/community/faq#hc-access-the-json
 # and https://github.com/bomeara/purpleairpy/blob/master/api.md
+#
+# portions based on
+#    https://github.com/wbertelsen/purpleair-to-prometheus/blob/main/purple_to_prom.py
+# last modified 12 December 2020, current as of 1 May 2021, by https://github.com/wbertelsen/
+# provided under the MIT License.
+
 
 import aqi, json, requests, prometheus_client, time
 
