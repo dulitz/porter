@@ -12,11 +12,10 @@
 # currently supports PurpleAir and Ambient Weather.
 
 import json, prometheus_client, requests, time, yaml
-
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import ambientweather, purpleair
+import ambientweather, purpleair, smartthings
 from prometheus import start_wsgi_server
 
 # /probe&target=80845&module=purpleair
@@ -50,6 +49,10 @@ class ProbeCollector(object):
                 elif module == 'ambientweather':
                     for target in targets:
                         for metric in ambientweather.collect(self.config, target):
+                            yield metric
+                elif module == 'smartthings':
+                    for target in targets:
+                        for metric in smartthings.collect(self.config, target):
                             yield metric
                 elif module == 'neurio' or module == 'pwrview':
                     pass
