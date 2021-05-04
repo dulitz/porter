@@ -5,17 +5,15 @@ MAINTAINER dulitz@gmail.com
 
 WORKDIR /app
 
-RUN apt-get update \
-    apt-get install -y git
+RUN apt-get update
+RUN apt-get install -y git
 
-RUN mkdir /home    \
-    mkdir /var/lib/porter \
-    cd /home       \
-    git clone https://github.com/dulitz/porter
+RUN mkdir /var/lib/porter
+RUN cd /home && git clone https://github.com/dulitz/porter
 
 WORKDIR /home/porter
 
-COPY porter.yml /var/lib/porter/
+RUN cp porter.yml /var/lib/porter/
 
 RUN pip3 install -r req.txt
 
