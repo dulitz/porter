@@ -21,15 +21,17 @@ def collect(config, target):
         return []
 
     metric_to_gauge = {}
-    def makegauge(metric, desc, labels=None):
+    def makegauge(metric, desc, labels=[]):
         already = metric_to_gauge.get(metric)
         if already:
             return already
-        if labels is None:
-            labels = ['macAddress', 'name']
-        gmf = GaugeMetricFamily(metric, desc, labels=labels)
+        alllabels = ['macAddress', 'name'] + labels
+        gmf = GaugeMetricFamily(metric, desc, labels=alllabels)
         metric_to_gauge[metric] = gmf
         return gmf
+    def addgaugesensormetric(metric, desc, labelvalues, sensor, value):
+        gmf = makegauge(metric, desc, ['sensor'])
+        gmf.add_metric(labelvalues + [sensor], value)
 
     for apikey in awconfig['apiKeys']:
         resp = requests.get("https://api.ambientweather.net/v1/devices?applicationKey={}&apiKey={}".format(awconfig['applicationKey'], apikey))
@@ -50,31 +52,34 @@ def collect(config, target):
                     g = makegauge('ambientweather_wind_gust_10m_mph', 'max wind gust (10 min)')
                     g.add_metric(labels, float(v))
                 elif k == 'humidity':
-                    g = makegauge('ambientweather_outdoor_humidity_pct', '% relative humidity, outdoors')
-                    g.add_metric(labels, float(v))
+                    addgaugesensormetric('ambientweather_humidity_pct', '%% relative humidity',
+                                         labels, 'outdoor', float(v))
                 elif k == 'humidityin':
-                    g = makegauge('ambientweather_indoor_humidity_pct', '% relative humidity, indoors')
-                    g.add_metric(labels, float(v))
+                    addgaugesensormetric('ambientweather_humidity_pct', '%% relative humidity',
+                                         labels, 'indoor', float(v))
                 elif k.startswith('humidity'):
                     suffix = k[8:]
-                    g = makegauge('ambientweather_humidity_%s_pct' % suffix, '%% relative humidity at sensor %s' % suffix)
-                    g.add_metric(labels, float(v))
+                    addgaugesensormetric('ambientweather_humidity_pct', '%% relative humidity',
+                                         labels, suffix, float(v))
                 elif k.startswith('batt'):
                     suffix = k[4:]
-                    g = makegauge('ambientweather_battery_%s_good' % suffix, '1 if battery %s is good' % suffix)
-                    g.add_metric(labels, int(v))
+                    addgaugesensormetric('ambientweather_battery_good', '1 if battery is good',
+                                         labels, suffix, int(v))
                 elif k == 'tempf':
-                    g = makegauge('ambientweather_outdoor_temp_c', 'outdoor temp (degrees C)')
-                    g.add_metric(labels, round((float(v)-32)*5/9, 1))
+                    addgaugesensormetric('ambientweather_temp_c', 'temperature (degrees Celsius)',
+                                         labels, 'outdoor', round((float(v)-32)*5/9, 1))
                 elif k == 'tempinf':
-                    g = makegauge('ambientweather_indoor_temp_c', 'indoor temp (degrees C)')
-                    g.add_metric(labels, round((float(v)-32)*5/9, 1))
+                    addgaugesensormetric('ambientweather_temp_c', 'temperature (degrees Celsius)',
+                                         labels, 'indoor', round((float(v)-32)*5/9, 1))
                 elif k.startswith('temp'):
                     suffix = k[4:]
                     if suffix.endswith('f'):
                         suffix = suffix[:len(suffix)-1]
-                    g = makegauge('ambientweather_temp_%s_c' % suffix, 'temperature at sensor %s (degrees C)' % suffix)
-                    g.add_metric(labels, round((float(v)-32)*5/9, 1))
+                        celsius = round((float(v)-32)*5/9, 1)
+                    else:
+                        celsius = float(v)
+                    addgaugesensormetric('ambientweather_temp_c', 'temperature (degrees Celsius)',
+                                         labels, suffix, celsius)
                 elif k == 'co2':
                     g = makegauge('ambientweather_indoor_co2_ppm', 'indoor CO2 concentration (ppm)')
                     g.add_metric(labels, float(v))
