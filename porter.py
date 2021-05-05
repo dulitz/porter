@@ -30,8 +30,9 @@ from prometheus import start_wsgi_server
 
 
 class ProbeCollector(object):
-    def __init__(self, config):
+    def __init__(self, config, stclient):
         self.config = config
+        self.smartthings = stclient
 
     def collect(self):
         return iter([])
@@ -52,7 +53,7 @@ class ProbeCollector(object):
                             yield metric
                 elif module == 'smartthings':
                     for target in targets:
-                        for metric in smartthings.collect(self.config, target):
+                        for metric in self.smartthings.collect(target):
                             yield metric
                 elif module == 'neurio' or module == 'pwrview':
                     pass
@@ -74,7 +75,8 @@ class Porter:
         port = self.config.get('port')
         if not port:
             self.config['port'] = 8000
-        REGISTRY.register(ProbeCollector(config))
+        stclient = smartthings.SmartThingsClient(self.config) if self.config.get('smartthings') else None
+        REGISTRY.register(ProbeCollector(config, stclient))
 
     def start_wsgi_server(self, port=0):
         if not port:
