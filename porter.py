@@ -9,13 +9,13 @@
 # by editing only the Prometheus configuration. this exporter can just run forever in a
 # container.
 #
-# currently supports PurpleAir and Ambient Weather.
+# currently supports PurpleAir, Ambient Weather, SmartThings, and Neurio/Generac PWRview.
 
 import json, prometheus_client, requests, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import ambientweather, purpleair, smartthings
+import ambientweather, neurio, purpleair, smartthings
 from prometheus import start_wsgi_server
 
 # /probe&target=80845&module=purpleair
@@ -56,7 +56,9 @@ class ProbeCollector(object):
                         for metric in self.smartthings.collect(target):
                             yield metric
                 elif module == 'neurio' or module == 'pwrview':
-                    pass
+                    for target in targets:
+                        for metric in neurio.collect(self.config, target):
+                            yield metric
                 else:
                     print('unknown module %s' % (params))
                     yield GaugeMetricFamily('ignore', 'ignore')
