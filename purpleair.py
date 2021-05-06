@@ -20,7 +20,6 @@ REQUEST_TIME = prometheus_client.Summary('purpleair_processing_seconds',
 
 @REQUEST_TIME.time()
 def collect(config, target):
-    # FIXME: ?? does target need to be munged to remove anything?
     resp = requests.get("https://www.purpleair.com/json?show={}".format(target))
     resp.raise_for_status()
 
@@ -32,14 +31,14 @@ def collect(config, target):
         gauges.append(gmf)
         return gmf
 
-    iaqi_gauge = makegauge('purpleair_pm_25_iaqi', 'iAQI')
-    aqandu_gauge = makegauge('purpleair_pm_25_iaqi_AQandU', 'iAQI w/ AQandU correction')
-    lrapa_gauge = makegauge('purpleair_pm_25_iaqi_LRAPA', 'iAQI w/ LRAPA correction')
-    ##rawpm1_gauge = makegauge('purpleair_pm_10_10m_raw', 'raw PM1.0 (10 min average)')
-    ##rawpm10_gauge = makegauge('purpleair_pm_100_10m_raw', 'raw PM10 (10 min average)')
-    tempc_gauge = makegauge('purpleair_temp_c', 'Sensor temp reading (degrees Celsius)')
-    pressure_gauge = makegauge('purpleair_pressure_mb', 'Sensor pressure reading (millibars)')
-    humidity_gauge = makegauge('purpleair_humidity_pct', 'Sensor relative humidity reading (percent)')
+    iaqi_gauge = makegauge('pm_25_iaqi', 'iAQI')
+    aqandu_gauge = makegauge('pm_25_iaqi_AQandU', 'iAQI w/ AQandU correction')
+    lrapa_gauge = makegauge('pm_25_iaqi_LRAPA', 'iAQI w/ LRAPA correction')
+    ##rawpm1_gauge = makegauge('pm_10_10m_raw', 'raw PM1.0 (10 min average)')
+    ##rawpm10_gauge = makegauge('pm_100_10m_raw', 'raw PM10 (10 min average)')
+    tempc_gauge = makegauge('temp_c', 'temperature (degrees Celsius)')
+    pressure_gauge = makegauge('sea_level_pressure_mb', 'sea level atmospheric pressure (millibars)')
+    humidity_gauge = makegauge('humidity_pct', 'relative humidity (percent)')
 
     js = resp.json()
     for sensor in js.get("results", []): # may raise ValueError
@@ -47,7 +46,7 @@ def collect(config, target):
         name = sensor.get("Label", '')
         stats = sensor.get("Stats")
         if stats:
-            # we get the 10 minutely average because we will only obtain a value on a
+            # we get the 10 minutely average because we may only obtain a value on a
             # 10 minutely basis, +/-
             pm25_raw = json.loads(stats).get("v1")
             if pm25_raw:

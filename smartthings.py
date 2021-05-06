@@ -117,27 +117,27 @@ class SmartThingsClient:
                         unit = 'c'
                         value = round((float(value)-32)*5/9, 1)
                     if innerk == 'switch':
-                        g = makegauge('smartthings_switch_on', '1 if switch on, 0 if switch off, -1 otherwise')
+                        g = makegauge('switch_on', '1 if switch on, 0 if switch off, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'on' else 0 if value == 'off' else -1)
                     elif innerk == 'water':
-                        g = makegauge('smartthings_water_dry', '1 if dry, 0 if wet, -1 otherwise')
+                        g = makegauge('water_dry', '1 if dry, 0 if wet, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'dry' else 0 if value == 'wet' else -1)
                     elif innerk == 'door' or innerk == 'contact':
-                        g = makegauge('smartthings_%s_closed' % innerk, '1 if closed, 0 if open, -1 otherwise')
+                        g = makegauge('%s_closed' % innerk, '1 if closed, 0 if open, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'closed' else 0 if value == 'open' else -1)
                     elif innerk == 'lock':
-                        g = makegauge('smartthings_lock_locked', '1 if locked, 0 if unlocked, -1 otherwise')
+                        g = makegauge('lock_locked', '1 if locked, 0 if unlocked, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'locked' else 0 if value == 'unlocked' else -1)
                     elif unit == '%':
                         # innerk: battery, level
-                        g = makegauge('smartthings_%s_pct' % innerk, 'percentage of full %s' % innerk)
+                        g = makegauge('%s_pct' % innerk, 'percentage of full %s' % innerk)
                         g.add_metric(labelvalues, float(value))
                     elif unit == 'w' or unit == 'kwh' or unit == 'f' or unit == 'c':
                         # innerk: power, energy, temperature
-                        g = makegauge('smartthings_%s_%s' % (innerk, unit), '%s (%s)' % (innerk, unit))
+                        g = makegauge('%s_%s' % (innerk, unit), '%s (%s)' % (innerk, unit))
                         g.add_metric(labelvalues, float(value))
                     elif innerk == 'color' or innerk == 'hue' or innerk == 'saturation':
-                        g = makegauge('smartthings_%s' % innerk, '%s of light' % innerk)
+                        g = makegauge('%s' % innerk, '%s of light' % innerk)
                         g.add_metric(labelvalues, float(value))
                     # ignoring innerk: threeAxis, acceleration, and things for locks
                     # for locks, innerv['data'] is dict with 'method' key -- defines label

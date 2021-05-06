@@ -43,33 +43,33 @@ def collect(config, target):
             labels = [macaddress, name]
             for (k, v) in sensor.get('lastData', {}).items():
                 if k == 'winddir':
-                    g = makegauge('ambientweather_wind_direction_degrees', 'wind direction')
+                    g = makegauge('wind_direction_degrees', 'wind direction')
                     g.add_metric(labels, float(v))
                 elif k == 'windspeedmph':
-                    g = makegauge('ambientweather_wind_speed_mph', 'wind speed')
+                    g = makegauge('wind_speed_mph', 'wind speed')
                     g.add_metric(labels, float(v))
                 elif k == 'windgustmph':
-                    g = makegauge('ambientweather_wind_gust_10m_mph', 'max wind gust (10 min)')
+                    g = makegauge('wind_gust_10m_mph', 'max wind gust (10 min)')
                     g.add_metric(labels, float(v))
                 elif k == 'humidity':
-                    addgaugesensormetric('ambientweather_humidity_pct', '%% relative humidity',
+                    addgaugesensormetric('humidity_pct', '%% relative humidity',
                                          labels, 'outdoor', float(v))
                 elif k == 'humidityin':
-                    addgaugesensormetric('ambientweather_humidity_pct', '%% relative humidity',
+                    addgaugesensormetric('humidity_pct', '%% relative humidity',
                                          labels, 'indoor', float(v))
                 elif k.startswith('humidity'):
                     suffix = k[8:]
-                    addgaugesensormetric('ambientweather_humidity_pct', '%% relative humidity',
+                    addgaugesensormetric('humidity_pct', '%% relative humidity',
                                          labels, suffix, float(v))
                 elif k.startswith('batt'):
                     suffix = k[4:]
-                    addgaugesensormetric('ambientweather_battery_good', '1 if battery is good',
+                    addgaugesensormetric('battery_good', '1 if battery is good',
                                          labels, suffix, int(v))
                 elif k == 'tempf':
-                    addgaugesensormetric('ambientweather_temp_c', 'temperature (degrees Celsius)',
+                    addgaugesensormetric('temp_c', 'temperature (degrees Celsius)',
                                          labels, 'outdoor', round((float(v)-32)*5/9, 1))
                 elif k == 'tempinf':
-                    addgaugesensormetric('ambientweather_temp_c', 'temperature (degrees Celsius)',
+                    addgaugesensormetric('temp_c', 'temperature (degrees Celsius)',
                                          labels, 'indoor', round((float(v)-32)*5/9, 1))
                 elif k.startswith('temp'):
                     suffix = k[4:]
@@ -78,22 +78,22 @@ def collect(config, target):
                         celsius = round((float(v)-32)*5/9, 1)
                     else:
                         celsius = float(v)
-                    addgaugesensormetric('ambientweather_temp_c', 'temperature (degrees Celsius)',
+                    addgaugesensormetric('temp_c', 'temperature (degrees Celsius)',
                                          labels, suffix, celsius)
                 elif k == 'co2':
-                    g = makegauge('ambientweather_indoor_co2_ppm', 'indoor CO2 concentration (ppm)')
+                    g = makegauge('indoor_co2_ppm', 'indoor CO2 concentration (ppm)')
                     g.add_metric(labels, float(v))
                 elif k == 'pm25':
-                    g = makegauge('ambientweather_pm25_ug_m3', 'PM2.5 in micrograms per cubic meter')
+                    g = makegauge('pm25_ug_m3', 'PM2.5 in micrograms per cubic meter')
                     g.add_metric(labels, float(v))
                 elif k == 'pm25_in':
-                    g = makegauge('ambientweather_indoor_pm25_ug_m3', 'indoor PM2.5 in micrograms per cubic meter')
+                    g = makegauge('indoor_pm25_ug_m3', 'indoor PM2.5 in micrograms per cubic meter')
                     g.add_metric(labels, float(v))
                 elif k == 'hourlyrainin':
-                    g = makegauge('ambientweather_rainrate_in_hr', 'rate of rain in inches per hour')
+                    g = makegauge('rainrate_in_hr', 'rate of rain in inches per hour')
                     g.add_metric(labels, float(v))
                 elif k == '24hourrainin':
-                    g = makegauge('ambientweather_rain_24hr_in', 'total rain last 24 hours (inches')
+                    g = makegauge('rain_24hr_in', 'total rain last 24 hours (inches')
                     g.add_metric(labels, float(v))
                 else:
                     pass
