@@ -9,6 +9,10 @@ RUN apt-get update
 RUN apt-get install -y git
 
 RUN mkdir /var/lib/porter
+
+# the next line causes the Docker cache to be invalidated when git changes
+ADD https://api.github.com/repos/dulitz/porter/git/refs/heads/main version.json
+
 RUN cd /home && git clone https://github.com/dulitz/porter
 
 WORKDIR /home/porter
