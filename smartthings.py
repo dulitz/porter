@@ -122,8 +122,8 @@ class SmartThingsClient:
                     elif innerk == 'water':
                         g = makegauge('smartthings_water_dry', '1 if dry, 0 if wet, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'dry' else 0 if value == 'wet' else -1)
-                    elif innerk == 'door':
-                        g = makegauge('smartthings_door_closed', '1 if closed, 0 if open, -1 otherwise')
+                    elif innerk == 'door' or innerk == 'contact':
+                        g = makegauge('smartthings_%s_closed' % innerk, '1 if closed, 0 if open, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'closed' else 0 if value == 'open' else -1)
                     elif innerk == 'lock':
                         g = makegauge('smartthings_lock_locked', '1 if locked, 0 if unlocked, -1 otherwise')
@@ -139,7 +139,7 @@ class SmartThingsClient:
                     elif innerk == 'color' or innerk == 'hue' or innerk == 'saturation':
                         g = makegauge('smartthings_%s' % innerk, '%s of light' % innerk)
                         g.add_metric(labelvalues, float(value))
-                    # ignoring innerk: threeAxis, acceleration, contact, and things for locks
+                    # ignoring innerk: threeAxis, acceleration, and things for locks
                     # for locks, innerv['data'] is dict with 'method' key -- defines label
 
         return metric_to_gauge.values()
