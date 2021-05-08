@@ -26,7 +26,7 @@ import json, prometheus_client, requests, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import ambientweather, neurio, purpleair, savant, smartthings
+import ambientweather, flo, neurio, purpleair, savant, smartthings
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
 
@@ -41,11 +41,12 @@ BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses', 'number o
 
 
 class ProbeCollector(object):
-    def __init__(self, config, sshproxy, stclient, savantclient):
+    def __init__(self, config, sshproxy, stclient, savantclient, floclient):
         self.config = config
         self.sshproxy = sshproxy
         self.smartthings = stclient
         self.savant = savantclient
+        self.flo = floclient
 
     def collect(self):
         return iter([])
@@ -61,6 +62,8 @@ class ProbeCollector(object):
             return [neurio.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
         elif module == 'savant':
             return [self.savant.collect(self.sshproxy.rewrite(t)) for t in targets]
+        elif module == 'flo':
+            return [self.flo.collect(self.sshproxy.rewrite(t)) for t in targets]
         else:
             raise RequestError('unknown module %s' % module)
 
@@ -105,7 +108,8 @@ class Porter:
         self.sshproxy = SSHProxy(self.config)
         stclient = smartthings.SmartThingsClient(self.config) if self.config.get('smartthings') else None
         savantclient = savant.SavantClient(self.config, self.sshproxy.identityfiles) if self.config.get('savant') else None
-        REGISTRY.register(ProbeCollector(config, self.sshproxy, stclient, savantclient))
+        floclient = flo.FloClient(self.config) if self.config.get('flo') else None
+        REGISTRY.register(ProbeCollector(config, self.sshproxy, stclient, savantclient, floclient))
 
     def start_wsgi_server(self, port=0):
         if not port:

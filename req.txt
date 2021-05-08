@@ -5,4 +5,5 @@
 PyYAML
 prometheus_client
 python-aqi
+pyflowater
 requests
