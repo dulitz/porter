@@ -31,6 +31,15 @@ from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
 
 
+class RequestError(Exception):
+    pass
+
+BAD_REQUEST_COUNT = prometheus_client.Counter('porter_bad_requests', 'number of bad requests')
+CONNECT_FAIL_COUNT = prometheus_client.Counter('porter_connect_failures',
+                                               'number of connection failures')
+BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses', 'number of bad responses')
+
+
 class ProbeCollector(object):
     def __init__(self, config, sshproxy, stclient, savantclient):
         self.config = config
@@ -40,44 +49,52 @@ class ProbeCollector(object):
 
     def collect(self):
         return iter([])
-        
+
+    def _probe_collect2(self, module, targets):
+        if module == 'purpleair':
+            return [purpleair.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
+        elif module == 'ambientweather':
+            return [ambientweather.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
+        elif module == 'smartthings':
+            return [self.smartthings.collect(self.sshproxy.rewrite(t)) for t in targets]
+        elif module == 'neurio' or module == 'pwrview':
+            return [neurio.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
+        elif module == 'savant':
+            return [self.savant.collect(self.sshproxy.rewrite(t)) for t in targets]
+        else:
+            raise RequestError('unknown module %s' % module)
+
     def collect2(self, path, params):
         targets = params.get('target', [])
         rawmodule = params.get('module')
         module = rawmodule[0] if rawmodule and len(rawmodule) == 1 else ''
-        if module and path.startswith('/probe'):
-            try:
-                if module == 'purpleair':
-                    for target in targets:
-                        for metric in purpleair.collect(self.config, self.sshproxy.rewrite(target)):
-                            yield metric
-                elif module == 'ambientweather':
-                    for target in targets:
-                        for metric in ambientweather.collect(self.config, self.sshproxy.rewrite(target)):
-                            yield metric
-                elif module == 'smartthings':
-                    for target in targets:
-                        for metric in self.smartthings.collect(self.sshproxy.rewrite(target)):
-                            yield metric
-                elif module == 'neurio' or module == 'pwrview':
-                    for target in targets:
-                        for metric in neurio.collect(self.config, self.sshproxy.rewrite(target)):
-                            yield metric
-                elif module == 'savant':
-                    for target in targets:
-                        for metric in self.savant.collect(self.sshproxy.rewrite(target)):
-                            yield metric
-                else:
-                    print('unknown module %s' % (params))
-                    yield GaugeMetricFamily('ignore', 'ignore')
-            except json.JSONDecodeError:
-                raise
-            except requests.exceptions.HTTPError:
-                raise
-        else:
-            print('unknown request %s %s' % (path, params))
-            yield GaugeMetricFamily('ignore', 'ignore')
 
+        try:
+            if module and path.startswith('/probe'):
+                for targetlist in self._probe_collect2(module, targets):
+                    for metric in targetlist:
+                        yield metric
+                return # return now if everything went well
+            else:
+                raise RequestError('unknown request %s %s' % (path, params))
+        except json.JSONDecodeError as e:
+            BAD_RESPONSE_COUNT.inc()
+            self.log(e)
+        except requests.exceptions.HTTPError as e:
+            BAD_RESPONSE_COUNT.inc()
+            self.log(e)
+        except requests.exceptions.ConnectionError as e:
+            CONNECT_FAIL_COUNT.inc()
+            self.log(e)
+        except RequestError as e:
+            BAD_REQUEST_COUNT.inc()
+            self.log(e)
+        # if we get here, we did not return above, so we must have handled an exception
+        yield GaugeMetricFamily('ignore', 'ignore')
+
+    def log(self, ex):
+        """report an exception"""
+        print(ex)
 
 class Porter:
     def __init__(self, config):
