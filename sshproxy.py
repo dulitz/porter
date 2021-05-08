@@ -20,10 +20,10 @@ class SSHProxy:
             self.proxies_cv = threading.Condition()
 
     def _makeidentityfile(self, keystring):
-        """write keystring (a private key) to an identifyfile in $HOME/identities/porter-proxy<>
+        """write keystring (a private key) to an identifyfile in $HOME/porter-ssh-identities/<>
            and return the name of the file"""
-        base = '%s/identities' % os.environ['HOME']
-        name = '%s/porter-proxy-%d' % (base, self.next_identity_file)
+        base = '%s/porter-ssh-identities' % os.environ['HOME']
+        name = '%s/%d' % (base, self.next_identity_file)
         self.next_identity_file += 1
         try:
             os.mkdir(base, 0o700)
@@ -58,7 +58,9 @@ class SSHProxy:
         for (k, v) in self.rewrites:
             if target == k:
                 self.proxyup(target, v)
-                return v[2]
+                # replace() here is a hack for broken Docker that won't let us bind to localhost.
+                # instead we can bind to all interfaces and then connect to localhost here.
+                return v[2].replace('0.0.0.0', 'localhost')
         return target
 
     def terminate(self):
