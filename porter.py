@@ -64,7 +64,7 @@ class ProbeCollector(object):
                         for metric in neurio.collect(self.config, self.sshproxy.rewrite(target)):
                             yield metric
                 elif module == 'savant':
-                    for targer in targets:
+                    for target in targets:
                         for metric in self.savant.collect(self.sshproxy.rewrite(target)):
                             yield metric
                 else:
