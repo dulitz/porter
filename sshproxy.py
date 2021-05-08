@@ -2,7 +2,13 @@
 #
 # ssh proxy for Porter, the Prometheus exporter
 
-import os, subprocess, threading, time
+import os, prometheus_client, subprocess, threading, time
+
+PROXY_COUNT = prometheus_client.Counter('sshproxy_listens', 'number of ssh instances')
+RESTART_COUNT = prometheus_client.Counter('sshproxy_restarts',
+                                          'number of ssh instances restarted')
+REQUEST_COUNT = prometheus_client.Counter('sshproxy_connections',
+                                          'number of uses of sshproxy')
 
 class SSHProxy:
     def __init__(self, config):
@@ -42,11 +48,13 @@ class SSHProxy:
                 r = proxy.poll()
                 if r:
                     print('proxy for %s returned %s, restarting' % (proxyspec, r))
+                    RESTART_COUNT.inc()
                     proxy = None
             if not proxy:
                 (remoteport, userhost, localhostport) = proxyspec
                 cmd = self.command + ['-L', '%s:%s:%d' % (localhostport, target, remoteport), userhost]
                 print('running', ' '.join(cmd))
+                PROXY_COUNT.inc()
                 proxy = subprocess.Popen(cmd)
                 time.sleep(1) # so ssh can start up
                 self.proxies[proxyspec] = proxy
@@ -58,6 +66,7 @@ class SSHProxy:
         for (k, v) in self.rewrites:
             if target == k:
                 self.proxyup(target, v)
+                REQUEST_COUNT.inc()
                 # replace() here is a hack for broken Docker that won't let us bind to localhost.
                 # instead we can bind to all interfaces and then connect to localhost here.
                 return v[2].replace('0.0.0.0', 'localhost')
