@@ -15,10 +15,12 @@ MAX_SCLI_STATES_PER_COMMAND = 99
 class SavantError(Exception):
     pass
 
-import itertools, subprocess, shlex, threading
+import itertools, prometheus_client, subprocess, shlex, threading
 from datetime import datetime
-
 from prometheus_client.core import GaugeMetricFamily
+
+REQUEST_TIME = prometheus_client.Summary('savant_processing_seconds',
+                                         'time of savant requests')
 
 class SavantProcess:
     def write(self, states, values):
@@ -145,18 +147,8 @@ class SavantClient:
             accum += zip(names, values)
         return accum
         
+    @REQUEST_TIME.time()
     def collect(self, target):
-        metric_to_gauge = {}
-        def makegauge(metric, desc, labels=None):
-            already = metric_to_gauge.get(metric)
-            if already:
-                return already
-            if labels is None:
-                labels = ['deviceId', 'nameLabel', 'location', 'health']
-            gmf = GaugeMetricFamily(metric, desc, labels=labels)
-            metric_to_gauge[metric] = gmf
-            return gmf
-
         gauges = []
         statevalues = self.get_state_values(target)
         userzones = self.target_seen.get(target).userzones
@@ -174,7 +166,7 @@ class SavantClient:
                 gmf.add_metric(labelvalues, v)
                 gauges.append(gmf)
         
-        return gauges # metric_to_gauge.values()
+        return gauges
 
     def _parse_segment(self, n, met):
         if met.find('_') >= 0:
