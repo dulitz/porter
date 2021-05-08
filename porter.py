@@ -87,7 +87,7 @@ class Porter:
             self.config['port'] = 8000
         self.sshproxy = SSHProxy(self.config)
         stclient = smartthings.SmartThingsClient(self.config) if self.config.get('smartthings') else None
-        savantclient = savant.SavantClient(self.config) if self.config.get('savant') else None
+        savantclient = savant.SavantClient(self.config, self.sshproxy.identityfiles) if self.config.get('savant') else None
         REGISTRY.register(ProbeCollector(config, self.sshproxy, stclient, savantclient))
 
     def start_wsgi_server(self, port=0):

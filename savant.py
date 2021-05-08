@@ -67,9 +67,10 @@ class SavantProcess:
 
 
 class SavantClient:
-    def __init__(self, config):
+    def __init__(self, config, sshidentities=[]):
         self.config = config
         self.sshport = config.get('savant', {}).get('sshport')
+        self.sshidentities = sshidentities
 
         # self.target_seen maps target to a structure with members userzones,
         # scenenames, and statenames.
@@ -85,7 +86,8 @@ class SavantClient:
             the_command = [path, subcommand] + arglist
         else:
             parg = ['-p%d' % self.sshport] if self.sshport else []
-            the_command = ['ssh'] + parg + ['-anxT', '-oServerAliveInterval=10', '-oBatchMode=yes', '-oClearAllForwardings=yes', host, path, subcommand] + [shlex.quote(v) for v in arglist]
+            iargs = ['-i%s' % f for f in self.sshidentities]
+            the_command = ['ssh'] + parg + iargs + ['-anxT', '-oServerAliveInterval=10', '-oBatchMode=yes', '-oClearAllForwardings=yes', host, path, subcommand] + [shlex.quote(v) for v in arglist]
         return subprocess.run(the_command, encoding='utf-8', check=True,
                               capture_output=True, timeout=20)
 
@@ -275,20 +277,3 @@ if __name__ == '__main__':
         metricname = metricname.replace(' ', '')
         labels = ['%s="%s"' % (n, v) for (n, v) in zip(labelnames, labelvalues)]
         print('%s{%s} = %s' % (metricname, ','.join(labels), v))
-
-    # try this out:
-    #
-    # if the first segment matches a userzone, it is a zone.
-    #
-    # each dot delimits a segment. the basename of a segment ends at the first underscore
-    # followed by a number.
-    #
-    # metric name is the basename of the last segment, or the last segment if there is no
-    # basename. the remainder of the last segment creates a label unit="25"
-    #
-    # each segment with a basename (i.e there is an underscore followed only by [0-9_]+)
-    # creates a label AV_switch="1"
-    #
-    # the first segment creates a label area="Audio Matrix" unless the first segment is
-    # empty (statename begins with a dot) in which case there is no area label.
-    #
