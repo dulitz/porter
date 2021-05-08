@@ -37,9 +37,11 @@ def registry_view_factory(parent, path, params):
                 if collect2_func:
                     for metric in collector.collect2(path, params):
                         yield metric
-                else:
-                    for metric in collector.collect():
-                        yield metric
+                # the only zero-argument collect collectors we have here are the default ones
+                # and they should not be emitted for /probe queries
+                #else:
+                #    for metric in collector.collect():
+                #        yield metric
     return ViewRestrictedRegistry(parent, path, params)
 
 
