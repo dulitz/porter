@@ -6,7 +6,7 @@ MAINTAINER dulitz@gmail.com
 WORKDIR /app
 
 RUN apt-get update
-RUN apt-get install -y git ssh
+RUN apt-get install -y git openssh-client
 
 RUN mkdir /var/lib/porter
 
