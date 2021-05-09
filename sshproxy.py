@@ -12,7 +12,7 @@ REQUEST_COUNT = prometheus_client.Counter('sshproxy_connections',
 
 class SSHProxy:
     def __init__(self, config):
-        self.rewrites = []
+        self.rewrites = {}
         self.next_identity_file = 0
         ours = config.get('sshproxy', {})
         if ours:
@@ -21,7 +21,7 @@ class SSHProxy:
                 keys = [keys]
             self.identityfiles = [self._makeidentityfile(k) for k in keys]
             self.command = ['ssh', '-aknxNT', '-p%d' % ours.get('sshport', 22)] + ['-i%s' % f for f in self.identityfiles]
-            self.rewrites = [(k, tuple(v)) for (k, v) in ours.items() if k != 'key' and k != 'port']
+            self.rewrites = {k: tuple(v) for (k, v) in ours.items() if k != 'key' and k != 'port'}
             self.proxies = {}
             self.proxies_cv = threading.Condition()
 
@@ -63,14 +63,24 @@ class SSHProxy:
         """checks whether target should be proxied. if not, returns target.
 
         if it should, ensures the proxy is up and returns the target rewritten to the proxy."""
-        for (k, v) in self.rewrites:
-            if target == k:
-                self.proxyup(target, v)
-                REQUEST_COUNT.inc()
-                # replace() here is a hack for broken Docker that won't let us bind to localhost.
-                # instead we can bind to all interfaces and then connect to localhost here.
-                return v[2].replace('0.0.0.0', 'localhost')
+        v = self.rewrites.get(target)
+        if v:
+            self.proxyup(target, v)
+            REQUEST_COUNT.inc()
+            # replace() here is a hack for broken Docker that won't let us bind to localhost.
+            # instead we can bind to all interfaces and then connect to localhost here.
+            return v[2].replace('0.0.0.0', 'localhost')
         return target
+
+    def restart_proxy_for(self, target):
+        """restart the proxy for this target because our caller detected a connection failure"""
+        proxyspec = self.rewrites.get(target)
+        if proxyspec:
+            with self.proxies_cv:
+                proxy = self.proxies.get(proxyspec)
+                if proxy:
+                    proxy.terminate()
+                    print('proxy for %s terminated due to failures on %s' % (proxyspec, target))
 
     def terminate(self):
         if not self.rewrites:
