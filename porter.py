@@ -11,7 +11,8 @@
 # by editing only the Prometheus configuration. this exporter can just run forever in a
 # container.
 #
-# currently supports PurpleAir, Ambient Weather, SmartThings, and Neurio/Generac PWRview.
+# currently supports PurpleAir, Ambient Weather, SmartThings, Neurio/Generac PWRview,
+# Savant, and Flo by Moen.
 #
 # e.g. /probe&target=80845&module=purpleair
 
@@ -82,22 +83,25 @@ class ProbeCollector(object):
                 raise RequestError('unknown request %s %s' % (path, params))
         except json.JSONDecodeError as e:
             BAD_RESPONSE_COUNT.inc()
-            self.log(e)
+            self.log(e, path, params)
         except requests.exceptions.HTTPError as e:
             BAD_RESPONSE_COUNT.inc()
-            self.log(e)
+            self.log(e, path, params)
         except requests.exceptions.ConnectionError as e:
             CONNECT_FAIL_COUNT.inc()
-            self.log(e)
+            for t in targets:
+                if self.sshproxy.rewrite(t) != t:
+                    self.sshproxy.restart_proxy_for(t)
+            self.log(e, path, params)
         except RequestError as e:
             BAD_REQUEST_COUNT.inc()
-            self.log(e)
-        # if we get here, we did not return above, so we must have handled an exception
+            self.log(e, path, params)
+        assert False # self.log() should have raised
         yield GaugeMetricFamily('ignore', 'ignore')
 
-    def log(self, ex):
+    def log(self, ex, path, params):
         """report an exception"""
-        print(ex)
+        raise Exception('while processing %s %s, caught exception %s' % (path, params, ex))
 
 class Porter:
     def __init__(self, config):
