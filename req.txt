@@ -5,5 +5,6 @@
 PyYAML
 prometheus_client
 python-aqi
+python-dateutil
 pyflowater
 requests
