@@ -5,12 +5,69 @@
 # see https://github.com/rsnodgrass/pyflowater
 
 
-import requests, prometheus_client, pyflowater, time
-
-from prometheus_client.core import GaugeMetricFamily
+import requests, prometheus_client, pyflowater, threading, time
+from datetime import datetime, timedelta
+from dateutil.parser import isoparse
+from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('flo_processing_seconds',
                                          'time of flo requests')
+
+# Flo can be queried for consumption within a time window but cannot be queried for a
+# counter directly (total gallons consumed). We maintain a counter metric for each device,
+# with its value starting at 0 at the time we are created. For each minute that elapses
+# after we are created, we request the minutely consumption within that minute and
+# add it to our counter at that timestamp.
+
+class Consumption:
+    def __init__(self, deviceid, macaddress, location, devicenickname, client_start_timestamp):
+        self.deviceid = deviceid
+        labels = ['macAddress', 'location']
+        self.labelvalues = [macaddress, location]
+        if devicenickname:
+            labels.append('nameLabel')
+            self.labelvalues.append(devicenickname)
+        self.cmf = CounterMetricFamily('water_used_gal',
+                                       'water consumption through this valve (gal)',
+                                       labels=labels,
+                                       created=client_start_timestamp)
+        self.end_timestamp = client_start_timestamp
+        self.value = 0
+
+    def get_end_timestamp(self):
+        return self.end_timestamp
+
+    def append(self, timestamp, gallons):
+        assert timestamp > self.end_timestamp, (timestamp, self.end_timestamp)
+        self.end_timestamp = timestamp
+        self.value += gallons
+        self.cmf.add_metric(self.labelvalues, gallons, timestamp=timestamp)
+
+    def fetch_and_append(self, floclient, lasttime):
+        #start = datetime.fromtimestamp(self.get_end_timestamp()).replace(second=0)
+        #end = datetime.now().replace(second=0)
+        #c = floclient.pyflo.consumption(self.deviceid, startDate=start,
+        #                                endDate=end-timedelta(microseconds=1),
+        #                                interval=pyflowater.INTERVAL_MINUTE)
+
+        start = datetime.fromtimestamp(self.get_end_timestamp()).replace(minute=0, second=0, microsecond=0)
+        end = datetime.fromtimestamp(lasttime.replace(minute=0, second=0, microsecond=0).timestamp())
+        if end - timedelta(hours=1) < start:
+            return # nothing to do yet
+
+        c = floclient.pyflo.consumption(self.deviceid, startDate=start, endDate=end)
+
+        last_block_ended = None
+        for block in c['items']:
+            block_start = block.get('time')
+            block_gal = block.get('gallonsConsumed')
+
+            if block_start and block_gal is not None:
+                last_block_ended = (isoparse(block_start) + timedelta(hours=1)).timestamp()
+                self.append(last_block_ended, block_gal)
+        if last_block_ended:
+            self.end_timestamp = last_block_ended
+
 
 class FloClient:
     def __init__(self, config):
@@ -20,16 +77,28 @@ class FloClient:
             raise Exception('no flo configuration')
         if not floconfig.get('user'):
             raise Exception('no flo user')
-        if not floconfig.get('password'):
+        password = floconfig.get('password')
+        if not password:
             raise Exception('no flo password')
-        if not floconfig.get('timeout'):
-            floconfig['timeout'] = 10
-        self.pyflo = pyflowater.PyFlo(floconfig.get('user'), floconfig.get('password'))
+        self.pyflo = pyflowater.PyFlo(floconfig.get('user'), password)
+        self.pyflo.save_password(password)
         self.refresh_time = 0 # get locations immediately
+        self.clientstarttime = time.time() - 3600
+        self.deviceid_to_consumption = {}
+        self.consumption_cv = threading.Condition()
+
+    def _get_consumption_object(self, deviceid, macaddress, location, devicenickname):
+        with self.consumption_cv:
+            cmf = self.deviceid_to_consumption.get(deviceid)
+            if not cmf:
+                cmf = Consumption(deviceid, macaddress, location, devicenickname,
+                                  self.clientstarttime)
+                self.deviceid_to_consumption[deviceid] = cmf
+            return cmf
 
     @REQUEST_TIME.time()
     def collect(self, target):
-        """request all the matching devices and get the status of each one"""
+        """get the status of each device at each location"""
 
         floconfig = self.config['flo']
         if time.time() > self.refresh_time:
@@ -78,12 +147,15 @@ class FloClient:
                 g = makegauge('water_pressure_psi', 'mains pressure (psi)')
                 g.add_metric(labelvalues, dprops['telemetry_pressure'])
                 tempc = round((float(dprops['telemetry_temperature'])-32)*5/9, 1)
-                g = makegauge('water_temp_c', 'mains temperature (degrees Celsius)')
+                g = makegauge('temp_c', 'ambient air temperature (degrees Celsius)')
                 g.add_metric(labelvalues, tempc)
                 g = makegauge('valve_actuations', 'count of valve actuations')
                 g.add_metric(labelvalues, dprops['valve_actuation_count'])
+
+                c = self._get_consumption_object(deviceid, d['macAddress'], locname, dname)
+                c.fetch_and_append(self, isoparse(d['lastHeardFromTime']))
                 
-        return metric_to_gauge.values()
+        return [v for v in metric_to_gauge.values()] + [c.cmf for c in self.deviceid_to_consumption.values()]
 
 if __name__ == '__main__':
     import json, sys, yaml
@@ -95,5 +167,14 @@ if __name__ == '__main__':
     for location in loc:
         for device in location['devices']:
             id = device['id']
-            print(json.dumps(client.pyflo.device(id), indent=2))
-            print(json.dumps(client.pyflo.consumption(id), indent=2))
+            dev = client.pyflo.device(id)
+            print(json.dumps(dev, indent=2))
+            lasttime = isoparse(dev['lastHeardFromTime'])
+            sd = lasttime.replace(minute=0, second=0, microsecond=0)
+            ed = sd + timedelta(minutes=5)
+            print(sd.isoformat(), ed.isoformat())
+            sd = datetime.fromtimestamp(sd.timestamp())
+            ed = datetime.fromtimestamp(ed.timestamp())
+            print(sd.strftime(pyflowater.FLO_TIME_FORMAT), ed.strftime(pyflowater.FLO_TIME_FORMAT))
+            print(json.dumps(client.pyflo.consumption(id, startDate=sd, endDate=ed, interval=pyflowater.INTERVAL_MINUTE), indent=2))
+            print(json.dumps(client.pyflo.consumption(id, endDate=sd), indent=2))
