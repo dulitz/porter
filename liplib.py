@@ -175,7 +175,7 @@ class LipServer:
                     self._read_buffer = self._read_buffer[match.end():]
                     return match
             else:
-                assert type(value) == type(''), value
+                assert type(value) == type(b''), value
                 where = self._read_buffer.find(value)
                 if where != -1:
                     until = self._read_buffer[:where+len(value)]
