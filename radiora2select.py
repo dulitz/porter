@@ -49,7 +49,6 @@ REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
 #      #device,1,2,3
 #      #device,1,2,4
 
-# TODO: when we start, we should query the output level of all our dimmers
 
 class Lipservice:
     def __init__(self, host, port, raconfig, client):
