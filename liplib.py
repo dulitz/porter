@@ -1,11 +1,12 @@
 """
 Interface module for Lutron Integration Protocol (LIP) over Telnet.
 
-This module connects to a Lutron hub through the Telnet interface which must be
-enabled through the integration menu in the Lutron mobile app.
+This module connects to a Lutron hub through the Telnet interface which, for
+Radio Ra2 Select, must be enabled through the integration menu in the Lutron mobile app.
 
 Authors:
 upsert (https://github.com/upsert)
+Daniel Dulitz (https://github.com/dulitz)
 
 Based on Casetify from jhanssen
 https://github.com/jhanssen/home-assistant/tree/caseta-0.40
@@ -76,7 +77,7 @@ def load_integration_report(integration_report) -> list:
 
 # pylint: disable=too-many-instance-attributes
 class LipServer:
-    """Communicate with a Lutron bridge."""
+    """Communicate with a Lutron bridge or other Lutron device."""
 
     READ_SIZE = 1024
     DEFAULT_USER = b"lutron"
@@ -256,7 +257,7 @@ class LipServer:
             await self.writer.drain()
 
     async def logout(self):
-        """Logout and severe the connect to the bridge."""
+        """Logout and sever the connect to the bridge."""
         async with self._write_lock:
             if self._state != LipServer.State.Opened:
                 return
