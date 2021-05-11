@@ -24,6 +24,33 @@ REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
 #
 # we set the gauge when we see ~OUTPUT.
 
+
+# what we can do:
+#   observe press and release of Pico buttons:
+#      ~DEVICE,28,2,3
+#      ~DEVICE,28,2,4
+#         [various ~OUTPUT changes from the button action]
+#   observe activation of scenes:
+#      ~DEVICE,1,1,3
+#         [various ~OUTPUT changes from the scene]
+#      ~DEVICE,1,1,4
+#   observe changes to output levels, e.g. from the app:
+#      ~OUTPUT,23,1,0.00
+#   query the output level of a dimmer:
+#      ?output,26,1
+#      returns ~OUTPUT,26,1,100.0
+#   press and release a Pico button causing it to activate its associated dimmers:
+#      #device,28,2,3
+#      #device,28,2,4
+#   returns ~OUTPUT,26,1,100.00
+#           ~OUTPUT,27,1,100.00
+#           ~OUTPUT,23,1,100.00
+#   run a scene
+#      #device,1,2,3
+#      #device,1,2,4
+
+# TODO: when we start, we should query the output level of all our dimmers
+
 class Lipservice:
     def __init__(self, host, port, raconfig, client):
         self.lipserver = liplib.LipServer()
@@ -41,10 +68,17 @@ class Lipservice:
             # insertions from other threads.
             self.outputlevels[deviceid] = None
 
+        print('new Lutron connection to %s:%d' % (host, port))
+
     async def open(self):
         await self.lipserver.open(self.host, self.port,
                                   username=self.raconfig['user'].encode(),
                                   password=self.raconfig['password'].encode())
+
+    async def query_levels(self):
+        await self.open()
+        for deviceid in self.outputlevels:
+            await self.lipserver.query('OUTPUT', deviceid, 1)
 
     async def poll(self):
         (a, b, c, d) = await self.lipserver.read()
@@ -55,13 +89,16 @@ class Lipservice:
             if action == liplib.LipServer.Button.PRESS:
                 if deviceid == 1: # then a scene was triggered
                     name = self.client.sceneid_to_name.get(component, '')
-                    self.cmf.add_metric(['', name, '', '', component], 1, timestamp=time.time())
+                    # list append is thread safe
+                    self.cmf.add_metric(['', name, '', '', str(component)],
+                                        1, timestamp=time.time())
                 else: # a standalone device
                     (name, area, buttons) = self.client.deviceid_to_sensortuple.get(deviceid, (None, None, None))
                     if name is None:
                         (name, area) = self.client.deviceid_to_dimmertuple.get(deviceid, (None, None))
-                # list append is thread safe
-                self.cmf.add_metric([deviceid, name, component, area], 1, timestamp=time.time())
+                    # list append is thread safe
+                    self.cmf.add_metric([str(deviceid), name, str(component), area],
+                                        1, timestamp=time.time())
         elif a == 'OUTPUT':
             deviceid, action, level = b, c, d
             if action == liplib.LipServer.Action.SET:
@@ -80,6 +117,7 @@ class Lipservice:
             print('~ERROR while polling: %s %s %s' % (b, c, d))
         else:
             print('unknown response while polling: %s %s %s %s' % (a, b, c, d))
+        return self.poll() # return ourselves as coroutine so we are restarted
 
 class LipserviceManager:
     def __init__(self):
@@ -107,17 +145,18 @@ class LipserviceManager:
             lips = self.hostport_to_lipservice.get((host, port))
             if not lips:
                 lips = Lipservice(host, port, raconfig, client)
-                self.hostport_to_lipserver[(host, port)] = lips
+                self.hostport_to_lipservice[(host, port)] = lips
+                asyncio.create_task(lips.query_levels()) # only do this once
                 self.tasks_pending.add(asyncio.create_task(lips.poll()))
         if self.tasks_pending:
             (done, self.tasks_pending) = await asyncio.wait(self.tasks_pending, timeout=timeout,
                                                             return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 # as each poll() completes, schedule it to run again
-                self.tasks_pending.add(asyncio.create_task(task.get_coro()))
+                self.tasks_pending.add(asyncio.create_task(task.result()))
         else:
             await asyncio.sleep(timeout)
-                
+
 
 class RadioRa2SelectClient:
     def __init__(self, config):
@@ -135,6 +174,15 @@ class RadioRa2SelectClient:
             self.process_integration_report(json.loads(integration_json_string))
         else:
             self._process_integration_yaml()
+        self.asyncthread = threading.Thread(target=self.asyncio_loop, name="RadioRa2SelectClient asyncio loop", daemon=True)
+        self.asyncthread.start()
+
+    def asyncio_loop(self):
+        async def loop():
+            print('RadioRa2Select beginning async polling')
+            while True:
+                await self.manager.poll()
+        asyncio.run(loop())
 
     def process_integration_report(self, js):
         """Reads an integration report that was generated by the Lutron app for
@@ -177,7 +225,7 @@ class RadioRa2SelectClient:
         """This processes the scenes and areas maps from the config to create the
         deviceid maps. Never needs to be called by the client.
         """
-        raconfig = config.get('radiora2select')
+        raconfig = self.config.get('radiora2select')
         self.sceneid_to_name = raconfig.get('scenes', {})
         self.areaname_to_devices = raconfig.get('areas', {})
         self.deviceid_to_dimmertuple = {}
@@ -203,30 +251,6 @@ class RadioRa2SelectClient:
             lis = ['[%s]' % ', '.join([str(devid), "'%s'" % dname] + [str(b) for b in buttons]) for (devid, dname, *buttons) in t]
             out.append(("    '%s': [" % areaname) + ', '.join(lis) + ']')
         return '\n'.join(out)
-
-    # what we can do:
-    #   observe press and release of Pico buttons:
-    #      ~DEVICE,28,2,3
-    #      ~DEVICE,28,2,4
-    #         [various ~OUTPUT changes from the button action]
-    #   observe activation of scenes:
-    #      ~DEVICE,1,1,3
-    #         [various ~OUTPUT changes from the scene]
-    #      ~DEVICE,1,1,4
-    #   observe changes to output levels, e.g. from the app:
-    #      ~OUTPUT,23,1,0.00
-    #   query the output level of a dimmer:
-    #      ?output,26,1
-    #      returns ~OUTPUT,26,1,100.0
-    #   press and release a Pico button causing it to activate its associated dimmers:
-    #      #device,28,2,3
-    #      #device,28,2,4
-    #   returns ~OUTPUT,26,1,100.00
-    #           ~OUTPUT,27,1,100.00
-    #           ~OUTPUT,23,1,100.00
-    #   run a scene
-    #      #device,1,2,3
-    #      #device,1,2,4
     
     @REQUEST_TIME.time()
     def collect(self, target):
@@ -237,7 +261,8 @@ class RadioRa2SelectClient:
         lips = self.manager.get_lipservice_for_target(target)
         if not lips:
             return []
-        gmf = GaugeMetricFamily(metric, desc, labels=['deviceId', 'name', 'area'])
+        gmf = GaugeMetricFamily('output_level_pct', 'current output level (% of full output)',
+                                labels=['deviceId', 'name', 'area'])
         for deviceid in lips.outputlevels.keys():
             level = lips.outputlevels[deviceid]
             if level is not None:
