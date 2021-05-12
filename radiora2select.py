@@ -50,6 +50,7 @@ REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
 #      #device,1,2,4
 
 # LipServer supports all of that. It also supports Homeworks QS monitoring of ~OUTPUT,
+# ~SHADEGRP, etc.
 
 class Lipservice:
     def __init__(self, host, port, raconfig, client):
