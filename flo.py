@@ -38,10 +38,10 @@ class Consumption:
         return self.end_timestamp
 
     def append(self, timestamp, gallons):
-        assert timestamp > self.end_timestamp, (timestamp, self.end_timestamp)
+        assert timestamp >= self.end_timestamp, (timestamp, self.end_timestamp)
         self.end_timestamp = timestamp
         self.value += gallons
-        self.cmf.add_metric(self.labelvalues, gallons, timestamp=timestamp)
+        self.cmf.add_metric(self.labelvalues, self.value, timestamp=timestamp)
 
     def fetch_and_append(self, floclient, lasttime):
         #start = datetime.fromtimestamp(self.get_end_timestamp()).replace(second=0)
@@ -173,8 +173,5 @@ if __name__ == '__main__':
             sd = lasttime.replace(minute=0, second=0, microsecond=0)
             ed = sd + timedelta(minutes=5)
             print(sd.isoformat(), ed.isoformat())
-            sd = datetime.fromtimestamp(sd.timestamp())
-            ed = datetime.fromtimestamp(ed.timestamp())
-            print(sd.strftime(pyflowater.FLO_TIME_FORMAT), ed.strftime(pyflowater.FLO_TIME_FORMAT))
             print(json.dumps(client.pyflo.consumption(id, startDate=sd, endDate=ed, interval=pyflowater.INTERVAL_MINUTE), indent=2))
             print(json.dumps(client.pyflo.consumption(id, endDate=sd), indent=2))
