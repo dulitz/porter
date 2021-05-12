@@ -207,7 +207,15 @@ class SavantClient:
                 if c != '_' and not c.isdigit():
                     if n > 1 and met[-n] == '_':
                         labelnames.append('unit')
-                        labelvalues.append(met[-(n-1):])
+                        unit = met[-(n-1):]
+                        labelvalues.append(unit)
+                        d = dict(zip(labelnames, labelvalues))
+                        component = d.get('component')
+                        if component and not d.get('name'):
+                            unitname = self.config.get('savant', {}).get('names', {}).get(component, {}).get(unit)
+                            if unitname:
+                                labelnames.append('name')
+                                labelvalues.append(unitname)
                         return (labelnames, labelvalues, met[:-n])
                     break
         return (labelnames, labelvalues, met)
