@@ -52,162 +52,24 @@ REQUEST_TIME = prometheus_client.Summary('lutron_processing_seconds',
 # LipServer supports all of that. We support all the monitoring above and also
 # Homeworks QS monitoring of ~OUTPUT and ~SHADEGRP.
 
-class Lipservice:
-    def __init__(self, host, port, raconfig, client):
-        self.lipserver = liplib.LipServer()
-        self.host, self.port = host, port
-        self.raconfig = raconfig
-        self.client = client
-        self.last_ping = time.time()
+class ConfigParams:
+    def __init__(self, toplutronconfig, target):
+        self.lutronconfig = toplutronconfig.get(target) or toplutronconfig
 
-        prompt = self.raconfig.get('prompt')
-        if prompt:
-            self.lipserver.prompt = prompt.encode() + b'> '
-        
-        self.cmf = CounterMetricFamily(
-            'press_actions', 'count of button presses and scene activations',
-            labels=['deviceid', 'name', 'button', 'area', 'scene_number'], created=time.time()
-        )
-        self.outputlevels = {}
-        for deviceid in self.client.deviceid_to_dimmertuple.keys():
-            # we initialize the dict so its key iterator won't be invalidated by
-            # insertions from other threads.
-            self.outputlevels[deviceid] = None
-
-        print('new Lutron connection to %s:%d' % (host, port))
-
-    async def open(self):
-        await self.lipserver.open(self.host, self.port,
-                                  username=self.raconfig['user'].encode(),
-                                  password=self.raconfig['password'].encode())
-        self.last_ping = time.time()
-
-    async def query_levels(self):
-        await self.open()
-        for deviceid in self.outputlevels:
-            await self.lipserver.query('OUTPUT', deviceid, 1)
-
-    async def ping(self):
-        ping_timeout = 10*60
-        while self.last_ping + ping_timeout > time.time():
-            await asyncio.sleep(self.last_ping + ping_timeout - time.time())
-        self.last_ping = time.time()
-        await self.lipserver.ping()
-        return self.ping()
-
-    async def poll(self):
-        (a, b, c, d) = await self.lipserver.read()
-        if a is None:
-            await self.open()
-        elif a == 'DEVICE':
-            deviceid, component, action = b, c, d
-            self.last_ping = time.time()
-            if action == liplib.LipServer.Button.PRESS:
-                if deviceid == 1: # then a scene was triggered
-                    name = self.client.sceneid_to_name.get(component, '')
-                    # list append is thread safe
-                    self.cmf.add_metric(['', name, '', '', str(component)],
-                                        1, timestamp=time.time())
-                else: # a standalone device
-                    (name, area, buttons) = self.client.deviceid_to_sensortuple.get(deviceid, (None, None, None))
-                    if name is None:
-                        (name, area) = self.client.deviceid_to_dimmertuple.get(deviceid, (None, None))
-                    # list append is thread safe
-                    self.cmf.add_metric([str(deviceid), name, str(component), area],
-                                        1, timestamp=time.time())
-        elif a == 'OUTPUT' or a == 'SHADEGRP':
-            # SHADEGRP is emitted by Homeworks QS
-            deviceid, action, level = b, c, d
-            self.last_ping = time.time()
-            if action == liplib.LipServer.Action.SET:
-                self.outputlevels[deviceid] = level
-            elif action == liplib.LipServer.Action.RAISING:
-                # valid response, we just don't have shades so this class doesn't support it
-                print('shade actions not supported for device %d' % deviceid)
-            elif action == liplib.LipServer.Action.LOWERING:
-                # valid response, we just don't have shades so this class doesn't support it
-                print('shade actions not supported for device %d' % deviceid)
-            elif action == liplib.LipServer.Action.STOP:
-                pass
-            elif action == 29 or action == 30:
-                # These are reported by Homeworks QS and possibly others (though NOT
-                # Radio Ra2 Select) and are not documented in the Homeworks Integration
-                # Guide. I have no idea about action 30. For action 29:
-                #    if value is 6, the previous change was caused by an integration command
-                #       (i.e. something we might write)
-                #    if value is 8, the change was caused by a keypad buttonpress
-                #    if value is 10, it was caused by a motion sensor for "occupancy"
-                #    if value is 11, it was caused by a motion sensor for "vacancy"
-                pass
-            else:
-                print('unknown ~OUTPUT action %d for deviceid %d' % (action, deviceid))
-        elif a == 'ERROR':
-            print('~ERROR while polling: %s %s %s' % (b, c, d))
-        else:
-            print('unknown response while polling: %s %s %s %s' % (a, b, c, d))
-        return self.poll() # return ourselves as coroutine so we are restarted
-
-class LipserviceManager:
-    def __init__(self):
-        self.cv = threading.Condition()
-        self.target_to_raconfig = {}
-        self.hostport_to_lipservice = {}
-        self.tasks_pending = set()
-
-    def register_target(self, target, raconfig, client):
-        with self.cv:
-            self.target_to_raconfig[target] = (raconfig, client)
-
-    def get_lipservice_for_target(self, target):
-        (host, colon, portstr) = target.partition(':')
-        port = int(portstr or 23)
-        return self.hostport_to_lipservice.get((host, port))
-
-    async def poll(self, timeout=1):
-        with self.cv:
-            targets = [t for t in self.target_to_raconfig.items()]
-        for (target, t) in targets:
-            (raconfig, client) = t
-            (host, colon, portstr) = target.partition(':')
-            port = int(portstr or 23)
-            lips = self.hostport_to_lipservice.get((host, port))
-            if not lips:
-                lips = Lipservice(host, port, raconfig, client)
-                self.hostport_to_lipservice[(host, port)] = lips
-                asyncio.create_task(lips.query_levels()) # only do this once
-                self.tasks_pending.add(asyncio.create_task(lips.poll()))
-                self.tasks_pending.add(asyncio.create_task(lips.ping()))
-        if self.tasks_pending:
-            (done, self.tasks_pending) = await asyncio.wait(self.tasks_pending, timeout=timeout,
-                                                            return_when=asyncio.FIRST_COMPLETED)
-            for task in done:
-                # as each poll() or ping() completes, schedule it to run again
-                self.tasks_pending.add(asyncio.create_task(task.result()))
-        else:
-            await asyncio.sleep(timeout)
-
-
-class LutronClient:
-    def __init__(self, config):
-        self.config = config
-        self.manager = LipserviceManager()
-        raconfig = config.get('lutron')
-        if not raconfig:
-            raise Exception('no lutron configuration')
         # we default to the username/password for Radio Ra2 Select
-        if not raconfig.get('user'):
-            raconfig['user'] = 'lutron'
-        if not raconfig.get('password'):
-            raconfig['password'] = 'integration'
-        integration_json_string = raconfig.get('integration')
+        if not self.lutronconfig.get('user'):
+            self.lutronconfig['user'] = 'lutron'
+        if not self.lutronconfig.get('password'):
+            self.lutronconfig['password'] = 'integration'
+
+        integration_json_string = self.lutronconfig.get('integration')
         if integration_json_string:
             self.process_integration_report(json.loads(integration_json_string))
         else:
             self._process_integration_yaml()
 
-    async def poll(self):
-        await self.manager.poll()
-        return self.poll()
+    def get(self, toplevel, default=None):
+        return self.lutronconfig.get(toplevel, default)
 
     def process_integration_report(self, js):
         """Reads an integration report that was generated by the Lutron app for
@@ -250,9 +112,8 @@ class LutronClient:
         """This processes the scenes and areas maps from the config to create the
         deviceid maps. Never needs to be called by the client.
         """
-        raconfig = self.config.get('lutron')
-        self.sceneid_to_name = raconfig.get('scenes', {})
-        self.areaname_to_devices = raconfig.get('areas', {})
+        self.sceneid_to_name = self.lutronconfig.get('scenes', {})
+        self.areaname_to_devices = self.lutronconfig.get('areas', {})
         self.deviceid_to_dimmertuple = {}
         self.deviceid_to_sensortuple = {}
         for (areaname, devicelist) in self.areaname_to_devices.items():
@@ -276,13 +137,162 @@ class LutronClient:
             lis = ['[%s]' % ', '.join([str(devid), "'%s'" % dname] + [str(b) for b in buttons]) for (devid, dname, *buttons) in t]
             out.append(("    '%s': [" % areaname) + ', '.join(lis) + ']')
         return '\n'.join(out)
+
+class Lipservice:
+    def __init__(self, host, port, cfparams):
+        self.lipserver = liplib.LipServer()
+        self.host, self.port = host, port
+        self.cfparams = cfparams
+        self.last_ping = time.time()
+
+        prompt = self.cfparams.get('prompt')
+        if prompt:
+            self.lipserver.prompt = prompt.encode() + b'> '
+        
+        self.cmf = CounterMetricFamily(
+            'press_actions', 'count of button presses and scene activations',
+            labels=['deviceid', 'name', 'button', 'area', 'scene_number'], created=time.time()
+        )
+        self.outputlevels = {}
+        for deviceid in self.cfparams.deviceid_to_dimmertuple.keys():
+            # we initialize the dict so its key iterator won't be invalidated by
+            # insertions from other threads.
+            self.outputlevels[deviceid] = None
+
+        print('new Lutron connection to %s:%d' % (host, port))
+
+    async def open(self):
+        await self.lipserver.open(self.host, self.port,
+                                  username=self.cfparams.get('user').encode(),
+                                  password=self.cfparams.get('password').encode())
+        self.last_ping = time.time()
+
+    async def query_levels(self):
+        await self.open()
+        for deviceid in self.outputlevels:
+            await self.lipserver.query('OUTPUT', deviceid, 1)
+
+    async def ping(self):
+        ping_timeout = 10*60
+        while self.last_ping + ping_timeout > time.time():
+            await asyncio.sleep(self.last_ping + ping_timeout - time.time())
+        self.last_ping = time.time()
+        await self.lipserver.ping()
+        return self.ping()
+
+    async def poll(self):
+        (a, b, c, d) = await self.lipserver.read()
+        if a is None:
+            await self.open()
+        elif a == 'DEVICE':
+            deviceid, component, action = b, c, d
+            self.last_ping = time.time()
+            if action == liplib.LipServer.Button.PRESS:
+                if deviceid == 1: # then a scene was triggered
+                    name = self.cfparams.sceneid_to_name.get(component, '')
+                    # list append is thread safe
+                    self.cmf.add_metric(['', name, '', '', str(component)],
+                                        1, timestamp=time.time())
+                else: # a standalone device
+                    (name, area, buttons) = self.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
+                    if name is None:
+                        (name, area) = self.cfparams.deviceid_to_dimmertuple.get(deviceid, (None, None))
+                    # list append is thread safe
+                    self.cmf.add_metric([str(deviceid), name, str(component), area],
+                                        1, timestamp=time.time())
+        elif a == 'OUTPUT' or a == 'SHADEGRP':
+            # SHADEGRP is emitted by Homeworks QS
+            deviceid, action, level = b, c, d
+            self.last_ping = time.time()
+            if action == liplib.LipServer.Action.SET:
+                self.outputlevels[deviceid] = level
+            elif action == liplib.LipServer.Action.RAISING:
+                # valid response, but outputlevel will be reported later so we ignore this
+                pass
+            elif action == liplib.LipServer.Action.LOWERING:
+                # valid response, but outputlevel will be reported later so we ignore this
+                pass
+            elif action == liplib.LipServer.Action.STOP:
+                pass
+            elif action == 29 or action == 30:
+                # These are reported by Homeworks QS and possibly others (though NOT
+                # Radio Ra2 Select) and are not documented in the Homeworks Integration
+                # Guide. I have no idea about action 30. For action 29:
+                #    if value is 6, the previous change was caused by an integration command
+                #       (i.e. something we might write)
+                #    if value is 8, the change was caused by a keypad buttonpress
+                #    if value is 10, it was caused by a motion sensor for "occupancy"
+                #    if value is 11, it was caused by a motion sensor for "vacancy"
+                pass
+            else:
+                print('unknown ~OUTPUT action %d for deviceid %d level %d' % (action, deviceid, level))
+        elif a == 'ERROR':
+            print('~ERROR while polling: %s %s %s' % (b, c, d))
+        else:
+            print('unknown response while polling: %s %s %s %s' % (a, b, c, d))
+        return self.poll() # return ourselves as coroutine so we are restarted
+
+class LipserviceManager:
+    def __init__(self):
+        self.cv = threading.Condition()
+        self.target_to_cfparams = {}
+        self.hostport_to_lipservice = {}
+        self.tasks_pending = set()
+
+    def register_target(self, lutronconfig, target):
+        with self.cv:
+            cfparams = self.target_to_cfparams.get(target)
+            if not cfparams:
+                cfparams = ConfigParams(lutronconfig, target)
+                self.target_to_cfparams[target] = cfparams
+            return cfparams
+
+    def get_lipservice_for_target(self, target):
+        (host, colon, portstr) = target.partition(':')
+        port = int(portstr or 23)
+        return self.hostport_to_lipservice.get((host, port))
+
+    async def poll(self, timeout=1):
+        with self.cv:
+            targets = [t for t in self.target_to_cfparams.items()]
+        for (target, cfparam) in targets:
+            (host, colon, portstr) = target.partition(':')
+            port = int(portstr or 23)
+            lips = self.hostport_to_lipservice.get((host, port))
+            if not lips:
+                lips = Lipservice(host, port, cfparam)
+                self.hostport_to_lipservice[(host, port)] = lips
+                asyncio.create_task(lips.query_levels()) # only do this once
+                self.tasks_pending.add(asyncio.create_task(lips.poll()))
+                self.tasks_pending.add(asyncio.create_task(lips.ping()))
+        if self.tasks_pending:
+            (done, self.tasks_pending) = await asyncio.wait(self.tasks_pending, timeout=timeout,
+                                                            return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                # as each poll() or ping() completes, schedule it to run again
+                self.tasks_pending.add(asyncio.create_task(task.result()))
+        else:
+            await asyncio.sleep(timeout)
+
+
+class LutronClient:
+    def __init__(self, config):
+        self.config = config
+        self.manager = LipserviceManager()
+        lutronconfig = config.get('lutron')
+        if not lutronconfig:
+            raise Exception('no lutron configuration')
+
+    async def poll(self):
+        await self.manager.poll()
+        return self.poll()
     
+
     @REQUEST_TIME.time()
     def collect(self, target):
         """request all the matching devices and get the status of each one"""
 
-        raconfig = self.config['lutron']
-        self.manager.register_target(target, raconfig, self)
+        cfparams = self.manager.register_target(self.config['lutron'], target)
         lips = self.manager.get_lipservice_for_target(target)
         if not lips:
             return []
@@ -291,7 +301,7 @@ class LutronClient:
         for deviceid in lips.outputlevels.keys():
             level = lips.outputlevels[deviceid]
             if level is not None:
-                (name, area) = self.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+                (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
                 gmf.add_metric([str(deviceid), name, area], level)
         return [gmf, lips.cmf]
 
@@ -300,10 +310,11 @@ if __name__ == '__main__':
     assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     client = LutronClient(config)
+    cfparams = ConfigParams(config.get('lutron'), 'ignored')
 
     js = json.load(open(sys.argv[2], 'rt')) # the integration report from the bridge
-    client.process_integration_report(js)
-    s = client.dump_integration_yaml_string()
+    cfparams.process_integration_report(js)
+    s = cfparams.dump_integration_yaml_string()
     print(s)
 
     #devices = liplib.load_integration_report(js)
