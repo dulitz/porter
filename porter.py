@@ -27,7 +27,7 @@ import asyncio, json, prometheus_client, requests, threading, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import ambientweather, flo, neurio, purpleair, radiora2select, savant, smartthings
+import ambientweather, flo, lutron, neurio, purpleair, savant, smartthings
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
 
@@ -107,10 +107,11 @@ class Porter:
             module_to_client['savant'] = savant.SavantClient(self.config, self.sshproxy.identityfiles)
         if self.config.get('flo'):
             module_to_client['flo'] = flo.FloClient(self.config)
-        if self.config.get('radiora2select'):
-            raclient = radiora2select.RadioRa2SelectClient(self.config)
-            module_to_client['radiora2select'] = raclient
-            awaitables.add(raclient.poll())
+        if self.config.get('lutron'):
+            lutronclient = lutron.RadioRa2SelectClient(self.config)
+            module_to_client['lutron'] = lutronclient
+            module_to_client['radiora2select'] = lutronclient
+            awaitables.add(lutronclient.poll())
         purpleair.config = self.config
         module_to_client['purpleair'] = purpleair
         neurio.config = self.config
