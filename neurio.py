@@ -32,9 +32,10 @@ REQUEST_TIME = prometheus_client.Summary('neurio_processing_seconds',
 #
 # GET http://[local_ipaddr]/current-sample
 
+config = None # set by caller
 
 @REQUEST_TIME.time()
-def collect(config, target):
+def collect(target):
     metric_to_gauge = {}
     def makegauge(metric, desc, labels=[]):
         already = metric_to_gauge.get(metric)

@@ -18,8 +18,10 @@ from prometheus_client.core import GaugeMetricFamily
 REQUEST_TIME = prometheus_client.Summary('purpleair_processing_seconds',
                                          'time of purpleair requests')
 
+config = None # set by caller
+
 @REQUEST_TIME.time()
-def collect(config, target):
+def collect(target):
     resp = requests.get("https://www.purpleair.com/json?show={}".format(target))
     resp.raise_for_status()
 

@@ -23,7 +23,7 @@
 # TODO: move from hardcoded to config file
 
 
-import json, prometheus_client, requests, time, yaml
+import asyncio, json, prometheus_client, requests, threading, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
@@ -42,32 +42,18 @@ BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses', 'number o
 
 
 class ProbeCollector(object):
-    def __init__(self, config, sshproxy, stclient, savantclient, floclient, ra2selectclient):
+    def __init__(self, config, sshproxy, module_to_client):
         self.config = config
         self.sshproxy = sshproxy
-        self.smartthings = stclient
-        self.savant = savantclient
-        self.flo = floclient
-        self.ra2selectclient = ra2selectclient
+        self.module_to_client = module_to_client
 
     def collect(self):
         return iter([])
 
     def _probe_collect2(self, module, targets):
-        if module == 'purpleair':
-            return [purpleair.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
-        elif module == 'ambientweather':
-            return [ambientweather.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
-        elif module == 'smartthings':
-            return [self.smartthings.collect(self.sshproxy.rewrite(t)) for t in targets]
-        elif module == 'neurio' or module == 'pwrview':
-            return [neurio.collect(self.config, self.sshproxy.rewrite(t)) for t in targets]
-        elif module == 'savant':
-            return [self.savant.collect(self.sshproxy.rewrite(t)) for t in targets]
-        elif module == 'flo':
-            return [self.flo.collect(self.sshproxy.rewrite(t)) for t in targets]
-        elif module == 'radiora2select':
-            return [self.ra2selectclient.collect(self.sshproxy.rewrite(t)) for t in targets]
+        client = self.module_to_client.get(module)
+        if client:
+            return [client.collect(self.sshproxy.rewrite(t)) for t in targets]
         else:
             raise RequestError('unknown module %s' % module)
 
@@ -113,13 +99,38 @@ class Porter:
         if not port:
             self.config['port'] = 8000
         self.sshproxy = SSHProxy(self.config)
-        stclient = smartthings.SmartThingsClient(self.config) if self.config.get('smartthings') else None
-        savantclient = savant.SavantClient(self.config, self.sshproxy.identityfiles) if self.config.get('savant') else None
-        floclient = flo.FloClient(self.config) if self.config.get('flo') else None
-        ra2select = radiora2select.RadioRa2SelectClient(self.config) if self.config.get('radiora2select') else None
-        REGISTRY.register(ProbeCollector(
-            config, self.sshproxy, stclient, savantclient, floclient, ra2select
-        ))
+        module_to_client = {}
+        awaitables = set()
+        if self.config.get('smartthings'):
+            module_to_client['smartthings'] = smartthings.SmartThingsClient(self.config)
+        if self.config.get('savant'):
+            module_to_client['savant'] = savant.SavantClient(self.config, self.sshproxy.identityfiles)
+        if self.config.get('flo'):
+            module_to_client['flo'] = flo.FloClient(self.config)
+        if self.config.get('radiora2select'):
+            raclient = radiora2select.RadioRa2SelectClient(self.config)
+            module_to_client['radiora2select'] = raclient
+            awaitables.add(raclient.poll())
+        purpleair.config = self.config
+        module_to_client['purpleair'] = purpleair
+        neurio.config = self.config
+        module_to_client['neurio'] = neurio
+        module_to_client['pwrview'] = neurio
+        REGISTRY.register(ProbeCollector(config, self.sshproxy, module_to_client))
+        if awaitables:
+            def loop():
+                async def async_loop():
+                    awaiting = awaitables
+                    print('started async polling loop, awaiting', len(awaiting))
+                    while True:
+                        (done, awaiting) = await asyncio.wait(awaiting, timeout=None, return_when=asyncio.FIRST_COMPLETED)
+                        for d in done:
+                            awaiting.add(d.result())
+                asyncio.run(async_loop())
+
+            self.asyncthread = threading.Thread(target=loop, name="asyncio loop", daemon=True)
+            self.asyncthread.start()
+
 
     def start_wsgi_server(self, port=0):
         if not port:
@@ -128,6 +139,9 @@ class Porter:
         start_wsgi_server(port)
 
     def terminate_proxies(self):
+        # TODO: currently when a proxy terminates, long-running clients will be down until
+        # another probe comes in, because only probes can restart proxies. this should really
+        # terminate and restart all the proxies.
         self.sshproxy.terminate()
 
 def main(args):

@@ -13,19 +13,19 @@ from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
                                          'time of Radio Ra2 Select requests')
 
-# for each target we have one "press_actions" metric, a counter, with labels
-# "area", "deviceid", "name", "button", and "scene_number". we have one
-# "output_levels" metric, a gauge, with labels "area", "deviceid", "name".
+# for each target we have one "press_actions" counter with labels
+# "area", "deviceid", "name", "button", and "scene_number", and one
+# "output_level_pct" gauge with labels "area", "deviceid", "name".
 #
-# we increment the counter when we see ~DEVICE. for deviceid 1, the scene_number is
-# taken from the component and the name is the scene name configured for that number;
-# area and button are empty. for other deviceids, scene_number is empty and button is
-# taken from the component.
+# when the Lutron device tells us an output level has changed, we update the gauge.
+# when the Lutron device tells us a press action has occurred, we increment the counter.
 #
-# we set the gauge when we see ~OUTPUT.
+# a press action on deviceid 1 means that a scene was triggered, so we apply the scene_number
+# label (area and button are empty). for other deviceids, scene_number is empty and button
+# is the component that was pressed.
 
 
-# what we can do:
+# Radio Ra2 Select supports the following parts of the Lutron Integration Protocol:
 #   observe press and release of Pico buttons:
 #      ~DEVICE,28,2,3
 #      ~DEVICE,28,2,4
@@ -39,7 +39,7 @@ REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
 #   query the output level of a dimmer:
 #      ?output,26,1
 #      returns ~OUTPUT,26,1,100.0
-#   press and release a Pico button causing it to activate its associated dimmers:
+#   press and release a Pico button causing it to activate its associated outputs:
 #      #device,28,2,3
 #      #device,28,2,4
 #   returns ~OUTPUT,26,1,100.00
@@ -49,6 +49,7 @@ REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
 #      #device,1,2,3
 #      #device,1,2,4
 
+# LipServer supports all of that. It also supports Homeworks QS monitoring of ~OUTPUT,
 
 class Lipservice:
     def __init__(self, host, port, raconfig, client):
@@ -56,6 +57,11 @@ class Lipservice:
         self.host, self.port = host, port
         self.raconfig = raconfig
         self.client = client
+        self.last_ping = time.time()
+
+        prompt = self.raconfig.get('prompt')
+        if prompt:
+            self.lipserver.prompt = prompt.encode() + b'> '
         
         self.cmf = CounterMetricFamily(
             'press_actions', 'count of button presses and scene activations',
@@ -73,11 +79,20 @@ class Lipservice:
         await self.lipserver.open(self.host, self.port,
                                   username=self.raconfig['user'].encode(),
                                   password=self.raconfig['password'].encode())
+        self.last_ping = time.time()
 
     async def query_levels(self):
         await self.open()
         for deviceid in self.outputlevels:
             await self.lipserver.query('OUTPUT', deviceid, 1)
+
+    async def ping(self):
+        ping_timeout = 10*60
+        while self.last_ping + ping_timeout > time.time():
+            await asyncio.sleep(self.last_ping + ping_timeout - time.time())
+        self.last_ping = time.time()
+        await self.lipserver.ping()
+        return self.ping()
 
     async def poll(self):
         (a, b, c, d) = await self.lipserver.read()
@@ -85,6 +100,7 @@ class Lipservice:
             await self.open()
         elif a == 'DEVICE':
             deviceid, component, action = b, c, d
+            self.last_ping = time.time()
             if action == liplib.LipServer.Button.PRESS:
                 if deviceid == 1: # then a scene was triggered
                     name = self.client.sceneid_to_name.get(component, '')
@@ -98,8 +114,10 @@ class Lipservice:
                     # list append is thread safe
                     self.cmf.add_metric([str(deviceid), name, str(component), area],
                                         1, timestamp=time.time())
-        elif a == 'OUTPUT':
+        elif a == 'OUTPUT' or a == 'SHADEGRP':
+            # SHADEGRP is emitted by Homeworks QS
             deviceid, action, level = b, c, d
+            self.last_ping = time.time()
             if action == liplib.LipServer.Action.SET:
                 self.outputlevels[deviceid] = level
             elif action == liplib.LipServer.Action.RAISING:
@@ -109,6 +127,16 @@ class Lipservice:
                 # valid response, we just don't have shades so this class doesn't support it
                 print('shade actions not supported for device %d' % deviceid)
             elif action == liplib.LipServer.Action.STOP:
+                pass
+            elif action == 29 or action == 30:
+                # These are reported by Homeworks QS and possibly others (though NOT
+                # Radio Ra2 Select) and are not documented in the Homeworks Integration
+                # Guide. I have no idea about action 30. For action 29:
+                #    if value is 6, the previous change was caused by an integration command
+                #       (i.e. something we might write)
+                #    if value is 8, the change was caused by a keypad buttonpress
+                #    if value is 10, it was caused by a motion sensor for "occupancy"
+                #    if value is 11, it was caused by a motion sensor for "vacancy"
                 pass
             else:
                 print('unknown ~OUTPUT action %d for deviceid %d' % (action, deviceid))
@@ -133,7 +161,7 @@ class LipserviceManager:
         (host, colon, portstr) = target.partition(':')
         port = int(portstr or 23)
         return self.hostport_to_lipservice.get((host, port))
-        
+
     async def poll(self, timeout=1):
         with self.cv:
             targets = [t for t in self.target_to_raconfig.items()]
@@ -147,11 +175,12 @@ class LipserviceManager:
                 self.hostport_to_lipservice[(host, port)] = lips
                 asyncio.create_task(lips.query_levels()) # only do this once
                 self.tasks_pending.add(asyncio.create_task(lips.poll()))
+                self.tasks_pending.add(asyncio.create_task(lips.ping()))
         if self.tasks_pending:
             (done, self.tasks_pending) = await asyncio.wait(self.tasks_pending, timeout=timeout,
                                                             return_when=asyncio.FIRST_COMPLETED)
             for task in done:
-                # as each poll() completes, schedule it to run again
+                # as each poll() or ping() completes, schedule it to run again
                 self.tasks_pending.add(asyncio.create_task(task.result()))
         else:
             await asyncio.sleep(timeout)
@@ -173,15 +202,10 @@ class RadioRa2SelectClient:
             self.process_integration_report(json.loads(integration_json_string))
         else:
             self._process_integration_yaml()
-        self.asyncthread = threading.Thread(target=self.asyncio_loop, name="RadioRa2SelectClient asyncio loop", daemon=True)
-        self.asyncthread.start()
 
-    def asyncio_loop(self):
-        async def loop():
-            print('RadioRa2Select beginning async polling')
-            while True:
-                await self.manager.poll()
-        asyncio.run(loop())
+    async def poll(self):
+        await self.manager.poll()
+        return self.poll()
 
     def process_integration_report(self, js):
         """Reads an integration report that was generated by the Lutron app for
