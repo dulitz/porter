@@ -13,8 +13,10 @@ from prometheus_client.core import GaugeMetricFamily
 REQUEST_TIME = prometheus_client.Summary('ambientweather_processing_seconds',
                                          'time of ambientweather requests')
 
+config = None # set by caller
+
 @REQUEST_TIME.time()
-def collect(config, target):
+def collect(target):
     awconfig = config.get('ambientweather')
     if not awconfig:
         print('no ambientweather configuration')

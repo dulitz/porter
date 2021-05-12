@@ -116,6 +116,8 @@ class Porter:
         neurio.config = self.config
         module_to_client['neurio'] = neurio
         module_to_client['pwrview'] = neurio
+        ambientweather.config = self.config
+        module_to_client['ambientweather'] = ambientweather
         REGISTRY.register(ProbeCollector(config, self.sshproxy, module_to_client))
         if awaitables:
             def loop():
