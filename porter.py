@@ -108,9 +108,8 @@ class Porter:
         if self.config.get('flo'):
             module_to_client['flo'] = flo.FloClient(self.config)
         if self.config.get('lutron'):
-            lutronclient = lutron.RadioRa2SelectClient(self.config)
+            lutronclient = lutron.LutronClient(self.config)
             module_to_client['lutron'] = lutronclient
-            module_to_client['radiora2select'] = lutronclient
             awaitables.add(lutronclient.poll())
         purpleair.config = self.config
         module_to_client['purpleair'] = purpleair

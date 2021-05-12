@@ -1,17 +1,17 @@
-# radiora2select.py
+# lutron.py
 #
-# the Lutron Radio Ra2 Select module for porter, the Prometheus exporter
+# the Lutron module for porter, the Prometheus exporter.
+#    supports Radio Ra2 Select, Homeworks QS, and probably others
 #
 # see https://github.com/upsert/liplib
 # and https://www.lutron.com/TechnicalDocumentLibrary/040249.pdf
-
 
 import asyncio, json, liplib, prometheus_client, time, threading
 
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
-REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
-                                         'time of Radio Ra2 Select requests')
+REQUEST_TIME = prometheus_client.Summary('lutron_processing_seconds',
+                                         'time of Lutron requests')
 
 # for each target we have one "press_actions" counter with labels
 # "area", "deviceid", "name", "button", and "scene_number", and one
@@ -49,8 +49,8 @@ REQUEST_TIME = prometheus_client.Summary('radiora2select_processing_seconds',
 #      #device,1,2,3
 #      #device,1,2,4
 
-# LipServer supports all of that. It also supports Homeworks QS monitoring of ~OUTPUT,
-# ~SHADEGRP, etc.
+# LipServer supports all of that. We support all the monitoring above and also
+# Homeworks QS monitoring of ~OUTPUT and ~SHADEGRP.
 
 class Lipservice:
     def __init__(self, host, port, raconfig, client):
@@ -187,13 +187,14 @@ class LipserviceManager:
             await asyncio.sleep(timeout)
 
 
-class RadioRa2SelectClient:
+class LutronClient:
     def __init__(self, config):
         self.config = config
         self.manager = LipserviceManager()
-        raconfig = config.get('radiora2select')
+        raconfig = config.get('lutron')
         if not raconfig:
-            raise Exception('no radiora2select configuration')
+            raise Exception('no lutron configuration')
+        # we default to the username/password for Radio Ra2 Select
         if not raconfig.get('user'):
             raconfig['user'] = 'lutron'
         if not raconfig.get('password'):
@@ -249,7 +250,7 @@ class RadioRa2SelectClient:
         """This processes the scenes and areas maps from the config to create the
         deviceid maps. Never needs to be called by the client.
         """
-        raconfig = self.config.get('radiora2select')
+        raconfig = self.config.get('lutron')
         self.sceneid_to_name = raconfig.get('scenes', {})
         self.areaname_to_devices = raconfig.get('areas', {})
         self.deviceid_to_dimmertuple = {}
@@ -266,7 +267,7 @@ class RadioRa2SelectClient:
         """Returns a YAML format string that reflects the integration. It's more compact
         and easier to read than the integration JSON.
         """
-        out = ['radiora2select:']
+        out = ['lutron:']
         out.append('  scenes:')
         for (sceneid, name) in sorted(self.sceneid_to_name.items()):
             out.append("    %d: '%s'" % (sceneid, name))
@@ -280,7 +281,7 @@ class RadioRa2SelectClient:
     def collect(self, target):
         """request all the matching devices and get the status of each one"""
 
-        raconfig = self.config['radiora2select']
+        raconfig = self.config['lutron']
         self.manager.register_target(target, raconfig, self)
         lips = self.manager.get_lipservice_for_target(target)
         if not lips:
@@ -298,7 +299,7 @@ if __name__ == '__main__':
     import sys, yaml
     assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
-    client = RadioRa2SelectClient(config)
+    client = LutronClient(config)
 
     js = json.load(open(sys.argv[2], 'rt')) # the integration report from the bridge
     client.process_integration_report(js)
