@@ -22,51 +22,50 @@ REQUEST_TIME = prometheus_client.Summary('flo_processing_seconds',
 class Consumption:
     def __init__(self, deviceid, macaddress, location, devicenickname, client_start_timestamp):
         self.deviceid = deviceid
-        labels = ['macAddress', 'location']
-        self.labelvalues = [macaddress, location]
-        if devicenickname:
-            labels.append('nameLabel')
-            self.labelvalues.append(devicenickname)
-        self.cmf = CounterMetricFamily('water_used_gal',
-                                       'water consumption through this valve (gal)',
-                                       labels=labels,
-                                       created=client_start_timestamp)
+        self.labelvalues = [macaddress, location, devicenickname or '']
         self.end_timestamp = client_start_timestamp
         self.value = 0
+        self.cv = threading.Condition()
+
+    def add_metric(self, cmf):
+        with self.cv:
+            cmf.add_metric(self.labelvalues, self.value, timestamp=self.end_timestamp)
 
     def get_end_timestamp(self):
-        return self.end_timestamp
+        with self.cv:
+            return self.end_timestamp
 
     def append(self, timestamp, gallons):
-        assert timestamp >= self.end_timestamp, (timestamp, self.end_timestamp)
-        self.end_timestamp = timestamp
-        self.value += gallons
-        self.cmf.add_metric(self.labelvalues, self.value, timestamp=timestamp)
+        with self.cv:
+            assert timestamp >= self.end_timestamp, (timestamp, self.end_timestamp)
+            if gallons:
+                self.end_timestamp = timestamp
+                self.value += gallons
+            print(f'DEBUG: added {gallons}, total {self.value} gal ending {datetime.fromtimestamp(timestamp)}')
 
     def fetch_and_append(self, floclient, lasttime):
-        #start = datetime.fromtimestamp(self.get_end_timestamp()).replace(second=0)
-        #end = datetime.now().replace(second=0)
-        #c = floclient.pyflo.consumption(self.deviceid, startDate=start,
-        #                                endDate=end-timedelta(microseconds=1),
-        #                                interval=pyflowater.INTERVAL_MINUTE)
-
         start = datetime.fromtimestamp(self.get_end_timestamp()).replace(minute=0, second=0, microsecond=0)
         end = datetime.fromtimestamp(lasttime.replace(minute=0, second=0, microsecond=0).timestamp())
-        if end - timedelta(hours=1) < start:
+        if end - start < timedelta(hours=1):
             return # nothing to do yet
 
+        print(f'DEBUG: consumption check from {start.isoformat()} to {end.isoformat()}')
         c = floclient.pyflo.consumption(self.deviceid, startDate=start, endDate=end)
 
-        last_block_ended = None
+        last_block_ended = 0
         for block in c['items']:
             block_start = block.get('time')
             block_gal = block.get('gallonsConsumed')
 
             if block_start and block_gal is not None:
-                last_block_ended = (isoparse(block_start) + timedelta(hours=1)).timestamp()
-                self.append(last_block_ended, block_gal)
-        if last_block_ended:
-            self.end_timestamp = last_block_ended
+                block_ended = (isoparse(block_start) + timedelta(hours=1)).timestamp()
+                if block_gal:
+                    self.append(block_ended, block_gal)
+                last_block_ended = max(last_block_ended, block_ended)
+        with self.cv:
+            if last_block_ended and last_block_ended - self.end_timestamp > 3600*8:
+                print(f'DEBUG: at {datetime.now().isoformat()} moving end_timestamp from {datetime.fromtimestamp(end_timestamp).isoformat()} to {datetime.fromtimestamp(last_block_ended - 3600*8).isoformat()}')
+                self.end_timestamp = last_block_ended - 3600*8
 
 
 class FloClient:
@@ -85,29 +84,32 @@ class FloClient:
         self.refresh_time = 0 # get locations immediately
         self.clientstarttime = time.time() - 3600
         self.deviceid_to_consumption = {}
+        self.locations_cv = threading.Condition()
         self.consumption_cv = threading.Condition()
 
     def _get_consumption_object(self, deviceid, macaddress, location, devicenickname):
         with self.consumption_cv:
-            cmf = self.deviceid_to_consumption.get(deviceid)
-            if not cmf:
-                cmf = Consumption(deviceid, macaddress, location, devicenickname,
+            cons = self.deviceid_to_consumption.get(deviceid)
+            if not cons:
+                cons = Consumption(deviceid, macaddress, location, devicenickname,
                                   self.clientstarttime)
-                self.deviceid_to_consumption[deviceid] = cmf
-            return cmf
+                self.deviceid_to_consumption[deviceid] = cons
+            return cons
 
     @REQUEST_TIME.time()
     def collect(self, target):
         """get the status of each device at each location"""
 
         floconfig = self.config['flo']
-        if time.time() > self.refresh_time:
-            self.locations = self.pyflo.locations()
-            self.refresh_time = time.time() + 86400
+        with self.locations_cv:
+            if time.time() > self.refresh_time:
+                self.locations = self.pyflo.locations()
+                self.refresh_time = time.time() + 86400
+            locations = [loc.copy() for loc in self.locations]
 
         metric_to_gauge = {}
 
-        for loc in self.locations:
+        for loc in locations:
             locname = loc.get('nickname', '')
             locmode = loc.get('systemMode')
             notif = loc.get('notifications', {})
@@ -154,8 +156,15 @@ class FloClient:
 
                 c = self._get_consumption_object(deviceid, d['macAddress'], locname, dname)
                 c.fetch_and_append(self, isoparse(d['lastHeardFromTime']))
+
+        cmf = CounterMetricFamily('water_used_gal',
+                                  'water consumption through this valve (gal)',
+                                  labels=['macAddress', 'location', 'nameLabel'],
+                                  created=self.clientstarttime)
+        for c in self.deviceid_to_consumption.values():
+            c.add_metric(cmf)
                 
-        return [v for v in metric_to_gauge.values()] + [c.cmf for c in self.deviceid_to_consumption.values()]
+        return [v for v in metric_to_gauge.values()] + [cmf]
 
 if __name__ == '__main__':
     import json, sys, yaml
