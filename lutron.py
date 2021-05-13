@@ -226,6 +226,17 @@ class Lipservice:
                 pass
             else:
                 print('unknown ~OUTPUT action %d for deviceid %d level %d' % (action, deviceid, level))
+        elif a == 'GROUP':
+            # emitted by Homeworks QS to show occupancy status of an occupancy sensor group.
+            # param of 3 means occupied, 4 means unoccupied, 255 is unknown
+            deviceid, action, param = b, c, d
+            if action == 3:
+                val = 100 if param == 3 else 0 if param == 4 else -1
+                if val == -1:
+                    print('unknown GROUP param %d for deviceid %d' % (param, deviceid))
+                self.outputlevels[deviceid] = val
+            else:
+                print('unknown GROUP action %d %d for deviceid %d' % (action, param, deviceid))
         elif a == 'ERROR':
             print('~ERROR while polling: %s %s %s' % (b, c, d))
         else:
