@@ -8,3 +8,4 @@ python-aqi
 python-dateutil
 pyflowater
 requests
+total-connect-client
