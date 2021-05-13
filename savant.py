@@ -212,7 +212,13 @@ class SavantClient:
                         d = dict(zip(labelnames, labelvalues))
                         component = d.get('component')
                         if component and not d.get('name'):
-                            unitname = self.config.get('savant', {}).get('names', {}).get(component, {}).get(unit)
+                            cd = self.config.get('savant', {}).get('names', {}).get(component, {})
+                            unitname = cd.get(unit)
+                            if cd and not unitname:
+                                try:
+                                    unitname = cd.get(int(unit))
+                                except ValueError:
+                                    pass
                             if unitname:
                                 labelnames.append('name')
                                 labelvalues.append(unitname)
