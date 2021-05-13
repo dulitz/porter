@@ -149,15 +149,15 @@ class Lipservice:
         if prompt:
             self.lipserver.prompt = prompt.encode() + b'> '
         
-        self.cmf = CounterMetricFamily(
-            'press_actions', 'count of button presses and scene activations',
-            labels=['deviceid', 'name', 'button', 'area', 'scene_number'], created=time.time()
-        )
+        self.counts_by_scene_number = {}
+        self.counts_by_deviceid_component = {}
         self.outputlevels = {}
         for deviceid in self.cfparams.deviceid_to_dimmertuple.keys():
-            # we initialize the dict so its key iterator won't be invalidated by
-            # insertions from other threads.
             self.outputlevels[deviceid] = None
+        # Hold the lock if you are going to add a key to the three dictionaries
+        # above, or if you are going to iterate over those dictionaries outside
+        # of the async task thread.
+        self.cv = threading.Condition()
 
         print('new Lutron connection to %s:%d' % (host, port))
 
@@ -169,6 +169,7 @@ class Lipservice:
 
     async def query_levels(self):
         await self.open()
+        # no need to hold the lock because we are in the async task thread
         for deviceid in self.outputlevels:
             await self.lipserver.query('OUTPUT', deviceid, 1)
 
@@ -180,28 +181,29 @@ class Lipservice:
         await self.lipserver.ping()
         return self.ping()
 
+    def _increment_counter(self, map_of_counters, key, increment=1):
+        new_value = map_of_counters.get(key, 0) + increment
+        with self.cv:
+            map_of_counters[key] = new_value
+        return new_value
+
     async def poll(self):
         (a, b, c, d) = await self.lipserver.read()
         if a is None:
             await self.open()
         elif a == 'DEVICE':
-            deviceid, component, action = b, c, d
+            deviceid, component, action = int(b), int(c), int(d)
             self.last_ping = time.time()
             if action == liplib.LipServer.Button.PRESS:
                 if deviceid == 1: # then a scene was triggered
-                    name = self.cfparams.sceneid_to_name.get(component, '')
-                    # list append is thread safe
-                    self.cmf.add_metric(['', name, '', '', str(component)],
-                                        1, timestamp=time.time())
+                    count = self._increment_counter(self.counts_by_scene_number, component)
                 else: # a standalone device
-                    (name, area, buttons) = self.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
-                    if name is None:
-                        (name, area) = self.cfparams.deviceid_to_dimmertuple.get(deviceid, (None, None))
-                    # list append is thread safe
-                    self.cmf.add_metric([str(deviceid), name, str(component), area],
-                                        1, timestamp=time.time())
+                    count = self._increment_counter(self.counts_by_deviceid_component, (deviceid, component))
+            # We ignore button releases even though that is where the action is taken.
+            # Thus we also ignore double-press and long-press that can be reported
+            # by Homeworks QS.
         elif a == 'OUTPUT' or a == 'SHADEGRP':
-            # SHADEGRP is emitted by Homeworks QS
+            # SHADEGRP is reported by Homeworks QS
             deviceid, action, level = b, c, d
             self.last_ping = time.time()
             if action == liplib.LipServer.Action.SET:
@@ -293,11 +295,11 @@ class LutronClient:
         lutronconfig = config.get('lutron')
         if not lutronconfig:
             raise Exception('no lutron configuration')
+        self.clientstarttime = time.time()
 
     async def poll(self):
         await self.manager.poll()
         return self.poll()
-    
 
     @REQUEST_TIME.time()
     def collect(self, target):
@@ -309,12 +311,30 @@ class LutronClient:
             return []
         gmf = GaugeMetricFamily('output_level_pct', 'current output level (% of full output)',
                                 labels=['deviceId', 'name', 'area'])
-        for deviceid in lips.outputlevels.keys():
-            level = lips.outputlevels[deviceid]
-            if level is not None:
-                (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
-                gmf.add_metric([str(deviceid), name, area], level)
-        return [gmf, lips.cmf]
+        cmf = CounterMetricFamily(
+            'press_actions', 'count of button presses and scene activations',
+            labels=['deviceid', 'name', 'button', 'area', 'scene_number'],
+            created=self.clientstarttime
+        )
+        with lips.cv:
+            for deviceid in lips.outputlevels.keys():
+                level = lips.outputlevels[deviceid]
+                if level is not None:
+                    (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+                    gmf.add_metric([str(deviceid), name, area], level)
+
+            for (sceneid, count) in lips.counts_by_scene_number.items():
+                name = lips.cfparams.sceneid_to_name.get(sceneid, '')
+                cmf.add_metric(['', name, '', '', str(sceneid)], count, timestamp=time.time())
+            for (tup, count) in lips.counts_by_deviceid_component.items():
+                (deviceid, component) = tup
+                (name, area, buttons) = lips.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
+                if name is None:
+                    (name, area) = lips.cfparams.deviceid_to_dimmertuple.get(deviceid, (None, None))
+                cmf.add_metric([str(deviceid), name, str(component), area],
+                               count, timestamp=time.time())
+
+        return [gmf, cmf]
 
 if __name__ == '__main__':
     import sys, yaml
