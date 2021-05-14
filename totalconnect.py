@@ -5,12 +5,14 @@
 # see https://github.com/craigjmidwinter/total-connect-client
 
 
-import requests, prometheus_client, threading, time
+import logging, prometheus_client, threading, time
 from datetime import datetime, timedelta
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
 from total_connect_client import TotalConnectClient as TCC
 #import totalconnectupstream as TCC
+
+LOGGER = logging.getLogger('porter.totalconnect')
 
 REQUEST_TIME = prometheus_client.Summary('totalconnect_processing_seconds',
                                          'time of totalconnect requests')
@@ -77,9 +79,9 @@ class TotalConnectClient:
         with self.cv:
             if not self.client:
                 fresh_data = True
-                print('connecting to TotalConnect...')
+                LOGGER.info(f'connecting to TotalConnect with user {tcconfig["user"]}...')
                 self.client = TCC.TotalConnectClient(tcconfig['user'], tcconfig['password'])
-                print('connected to TotalConnect')
+                LOGGER.info('connected to TotalConnect')
 
         metric_to_gauge = {}
         for loc in self.client.locations.values():
