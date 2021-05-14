@@ -6,9 +6,11 @@
 # see https://github.com/upsert/liplib
 # and https://www.lutron.com/TechnicalDocumentLibrary/040249.pdf
 
-import asyncio, json, liplib, prometheus_client, time, threading
+import asyncio, json, liplib, logging, prometheus_client, time, threading
 
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+
+LOGGER = logging.getLogger('porter.lutron')
 
 REQUEST_TIME = prometheus_client.Summary('lutron_processing_seconds',
                                          'time of Lutron requests')
@@ -159,7 +161,7 @@ class Lipservice:
         # of the async task thread.
         self.cv = threading.Condition()
 
-        print('new Lutron connection to %s:%d' % (host, port))
+        LOGGER.info(f'new Lutron connection to {host}:{port}')
 
     async def open(self):
         await self.lipserver.open(self.host, self.port,
@@ -227,7 +229,7 @@ class Lipservice:
                 #    if value is 11, it was caused by a motion sensor for "vacancy"
                 pass
             else:
-                print('unknown ~OUTPUT action %d for deviceid %d level %d' % (action, deviceid, level))
+                LOGGER.warning(f'unknown ~OUTPUT action {action} for deviceid {deviceid} level {level}')
         elif a == 'GROUP':
             # emitted by Homeworks QS to show occupancy status of an occupancy sensor group.
             # param of 3 means occupied, 4 means unoccupied, 255 is unknown
@@ -235,14 +237,14 @@ class Lipservice:
             if action == 3:
                 val = 100 if param == 3 else 0 if param == 4 else -1
                 if val == -1:
-                    print('unknown GROUP param %d for deviceid %d' % (param, deviceid))
+                    LOGGER.warning(f'unknown GROUP param {param} for deviceid {deviceid}')
                 self.outputlevels[deviceid] = val
             else:
-                print('unknown GROUP action %d %d for deviceid %d' % (action, param, deviceid))
+                LOGGER.warning(f'unknown GROUP action {action} {param} for deviceid {deviceid}')
         elif a == 'ERROR':
-            print('~ERROR while polling: %s %s %s' % (b, c, d))
+            LOGGER.error(f'~ERROR while polling: {b} {c} {d}')
         else:
-            print('unknown response while polling: %s %s %s %s' % (a, b, c, d))
+            LOGGER.warning(f'unknown response while polling: {a} {b} {c} {d}')
         return self.poll() # return ourselves as coroutine so we are restarted
 
 class LipserviceManager:
