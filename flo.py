@@ -11,7 +11,6 @@ from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 LOGGER = logging.getLogger('porter.flo')
-LOGGER.setLevel(logging.DEBUG)
 
 REQUEST_TIME = prometheus_client.Summary('flo_processing_seconds',
                                          'time of flo requests')
@@ -32,7 +31,7 @@ class Consumption:
 
     def add_metric(self, cmf):
         with self.cv:
-            cmf.add_metric(self.labelvalues, self.value, timestamp=self.end_timestamp)
+            cmf.add_metric(self.labelvalues, self.value)
 
     def get_end_timestamp(self):
         with self.cv:

@@ -327,14 +327,13 @@ class LutronClient:
 
             for (sceneid, count) in lips.counts_by_scene_number.items():
                 name = lips.cfparams.sceneid_to_name.get(sceneid, '')
-                cmf.add_metric(['', name, '', '', str(sceneid)], count, timestamp=time.time())
+                cmf.add_metric(['', name, '', '', str(sceneid)], count)
             for (tup, count) in lips.counts_by_deviceid_component.items():
                 (deviceid, component) = tup
                 (name, area, buttons) = lips.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
                 if name is None:
                     (name, area) = lips.cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
-                cmf.add_metric([str(deviceid), name, str(component), area],
-                               count, timestamp=time.time())
+                cmf.add_metric([str(deviceid), name, str(component), area], count)
 
         return [gmf, cmf]
 
