@@ -23,7 +23,7 @@
 # TODO: move from hardcoded to config file
 
 
-import asyncio, json, prometheus_client, requests, threading, time, yaml
+import asyncio, json, logging, prometheus_client, requests, threading, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
@@ -31,9 +31,10 @@ import ambientweather, flo, lutron, neurio, purpleair, savant, smartthings, tota
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
 
-
 class RequestError(Exception):
     pass
+
+LOGGER = logging.getLogger('porter')
 
 BAD_REQUEST_COUNT = prometheus_client.Counter('porter_bad_requests', 'number of bad requests')
 CONNECT_FAIL_COUNT = prometheus_client.Counter('porter_connect_failures',
@@ -126,7 +127,7 @@ class Porter:
             def loop():
                 async def async_loop():
                     awaiting = awaitables
-                    print('started async polling loop, awaiting', len(awaiting))
+                    LOGGER.info(f'started async polling loop, awaiting {len(awaiting)}')
                     while True:
                         (done, awaiting) = await asyncio.wait(awaiting, timeout=None, return_when=asyncio.FIRST_COMPLETED)
                         for d in done:
@@ -140,7 +141,7 @@ class Porter:
     def start_wsgi_server(self, port=0):
         if not port:
             port = self.config['port']
-        print('serving on port %d' % port)
+        LOGGER.info(f'serving on port {port}')
         start_wsgi_server(port)
 
     def terminate_proxies(self):
@@ -150,15 +151,16 @@ class Porter:
         self.sshproxy.terminate()
 
 def main(args):
+    logging.basicConfig(level=logging.INFO)
     configfile = 'porter.yml'
     if len(args) > 1:
         configfile = args[1]
 
     config = yaml.safe_load(open(configfile, 'rt')) or {}
     if config:
-        print('using configuration file %s' % configfile)
+        logging.info(f'using configuration file {configfile}')
     else:
-        print('configuration file %s was empty; ignored' % configfile)
+        logging.info(f'configuration file {configfile} was empty; ignored')
     p = Porter(config)
     p.start_wsgi_server()
 
