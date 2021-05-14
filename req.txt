@@ -6,6 +6,6 @@ PyYAML
 prometheus_client
 python-aqi
 python-dateutil
-pyflowater
+pyflowater>=0.4.3
 requests
 total-connect-client

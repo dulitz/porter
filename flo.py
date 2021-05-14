@@ -5,10 +5,13 @@
 # see https://github.com/rsnodgrass/pyflowater
 
 
-import requests, prometheus_client, pyflowater, threading, time
-from datetime import datetime, timedelta
+import logging, requests, prometheus_client, pyflowater, threading, time
+from datetime import datetime, timedelta, timezone
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+
+LOGGER = logging.getLogger('porter.flo')
+LOGGER.setLevel(logging.DEBUG)
 
 REQUEST_TIME = prometheus_client.Summary('flo_processing_seconds',
                                          'time of flo requests')
@@ -41,15 +44,15 @@ class Consumption:
             if gallons:
                 self.end_timestamp = timestamp
                 self.value += gallons
-            print(f'DEBUG: added {gallons}, total {self.value} gal ending {datetime.fromtimestamp(timestamp)}')
+            LOGGER.debug(f'added {gallons}, total {self.value} gal ending {datetime.fromtimestamp(timestamp)}')
 
     def fetch_and_append(self, floclient, lasttime):
-        start = datetime.fromtimestamp(self.get_end_timestamp()).replace(minute=0, second=0, microsecond=0)
-        end = datetime.fromtimestamp(lasttime.replace(minute=0, second=0, microsecond=0).timestamp())
+        start = datetime.fromtimestamp(self.get_end_timestamp(), tz=timezone.utc).replace(minute=0, second=0, microsecond=0)
+        end = lasttime.replace(minute=0, second=0, microsecond=0).astimezone(tz=timezone.utc)
         if end - start < timedelta(hours=1):
             return # nothing to do yet
 
-        print(f'DEBUG: consumption check from {start.isoformat()} to {end.isoformat()}')
+        LOGGER.debug(f'consumption check from {start.isoformat()} to {end.isoformat()}')
         c = floclient.pyflo.consumption(self.deviceid, startDate=start, endDate=end)
 
         last_block_ended = 0
@@ -64,7 +67,7 @@ class Consumption:
                 last_block_ended = max(last_block_ended, block_ended)
         with self.cv:
             if last_block_ended and last_block_ended - self.end_timestamp > 3600*8:
-                print(f'DEBUG: at {datetime.now().isoformat()} moving end_timestamp from {datetime.fromtimestamp(end_timestamp).isoformat()} to {datetime.fromtimestamp(last_block_ended - 3600*8).isoformat()}')
+                LOGGER.debug(f'at {datetime.now().isoformat()} moving end_timestamp from {datetime.fromtimestamp(self.end_timestamp).isoformat()} to {datetime.fromtimestamp(last_block_ended - 3600*8).isoformat()}')
                 self.end_timestamp = last_block_ended - 3600*8
 
 
