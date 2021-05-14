@@ -332,7 +332,7 @@ class LutronClient:
                 (deviceid, component) = tup
                 (name, area, buttons) = lips.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
                 if name is None:
-                    (name, area) = lips.cfparams.deviceid_to_dimmertuple.get(deviceid, (None, None))
+                    (name, area) = lips.cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
                 cmf.add_metric([str(deviceid), name, str(component), area],
                                count, timestamp=time.time())
 
