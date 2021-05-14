@@ -2,7 +2,9 @@
 #
 # ssh proxy for Porter, the Prometheus exporter
 
-import os, prometheus_client, subprocess, threading, time
+import logging, os, prometheus_client, subprocess, threading, time
+
+LOGGER = logging.getLogger('porter.sshproxy')
 
 PROXY_COUNT = prometheus_client.Counter('sshproxy_listens', 'number of ssh instances')
 RESTART_COUNT = prometheus_client.Counter('sshproxy_restarts',
@@ -47,13 +49,13 @@ class SSHProxy:
             if proxy:
                 r = proxy.poll()
                 if r:
-                    print('proxy for %s returned %s, restarting' % (proxyspec, r))
+                    LOGGER.warning(f'sshproxy for {proxyspec} returned {r}; restarting')
                     RESTART_COUNT.inc()
                     proxy = None
             if not proxy:
                 (remoteport, userhost, localhostport) = proxyspec
                 cmd = self.command + ['-L', '%s:%s:%d' % (localhostport, target, remoteport), userhost]
-                print('running', ' '.join(cmd))
+                LOGGER.info(f'running {" ".join(cmd)}')
                 PROXY_COUNT.inc()
                 proxy = subprocess.Popen(cmd)
                 time.sleep(1) # so ssh can start up
@@ -80,7 +82,7 @@ class SSHProxy:
                 proxy = self.proxies.get(proxyspec)
                 if proxy:
                     proxy.terminate()
-                    print('proxy for %s terminated due to failures on %s' % (proxyspec, target))
+                    LOGGER.warning(f'proxy for {proxyspec} terminated due to failures on {target}')
 
     def terminate(self):
         if not self.rewrites:
