@@ -206,7 +206,7 @@ class LipServer:
                            int(match.group(2)), int(match.group(3)), \
                            float(match.group(4))
                 except ValueError:
-                    print("Exception in ", match.group(0))
+                    _LOGGER.warning("Exception in ", match.group(0))
         if match is False:
             # attempt to reconnect
             _LOGGER.info("Reconnecting to the bridge %s", self._host)
