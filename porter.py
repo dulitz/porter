@@ -40,6 +40,7 @@ BAD_REQUEST_COUNT = prometheus_client.Counter('porter_bad_requests', 'number of 
 CONNECT_FAIL_COUNT = prometheus_client.Counter('porter_connect_failures',
                                                'number of connection failures')
 BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses', 'number of bad responses')
+REQUEST_EXCEPTION_COUNT = prometheus_client.Counter('porter_request_exceptions', 'number of exceptions while processing a request')
 
 
 class ProbeCollector(object):
@@ -51,6 +52,7 @@ class ProbeCollector(object):
     def collect(self):
         return iter([])
 
+    @REQUEST_EXCEPTION_COUNT.count_exceptions()
     def _probe_collect2(self, module, targets):
         client = self.module_to_client.get(module)
         if client:
