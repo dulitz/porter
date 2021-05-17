@@ -27,7 +27,7 @@ import asyncio, json, logging, prometheus_client, requests, threading, time, yam
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import ambientweather, flo, lutron, neurio, purpleair, rachio, savant
+import ambientweather, combox, flo, lutron, neurio, purpleair, rachio, savant
 import smartthings, tankutility, totalconnect
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
@@ -105,10 +105,8 @@ class Porter:
         self.sshproxy = SSHProxy(self.config)
         module_to_client = {}
         awaitables = set()
-        if self.config.get('smartthings'):
-            module_to_client['smartthings'] = smartthings.SmartThingsClient(self.config)
-        if self.config.get('savant'):
-            module_to_client['savant'] = savant.SavantClient(self.config, self.sshproxy.identityfiles)
+        if self.config.get('combox'):
+            module_to_client['combox'] = combox.ComboxClient(self.config)
         if self.config.get('flo'):
             module_to_client['flo'] = flo.FloClient(self.config)
         if self.config.get('lutron'):
@@ -118,19 +116,23 @@ class Porter:
         if self.config.get('rachio'):
             rclient = rachio.RachioClient(self.config)
             module_to_client['rachio'] = rclient
+        if self.config.get('savant'):
+            module_to_client['savant'] = savant.SavantClient(self.config, self.sshproxy.identityfiles)
+        if self.config.get('smartthings'):
+            module_to_client['smartthings'] = smartthings.SmartThingsClient(self.config)
         if self.config.get('tankutility'):
             tuclient = tankutility.TankUtilityClient(self.config)
             module_to_client['tankutility'] = tuclient
         if self.config.get('totalconnect'):
             tcclient = totalconnect.TotalConnectClient(self.config)
             module_to_client['totalconnect'] = tcclient
-        purpleair.config = self.config
-        module_to_client['purpleair'] = purpleair
+        ambientweather.config = self.config
+        module_to_client['ambientweather'] = ambientweather
         neurio.config = self.config
         module_to_client['neurio'] = neurio
         module_to_client['pwrview'] = neurio
-        ambientweather.config = self.config
-        module_to_client['ambientweather'] = ambientweather
+        purpleair.config = self.config
+        module_to_client['purpleair'] = purpleair
         REGISTRY.register(ProbeCollector(config, self.sshproxy, module_to_client))
         if awaitables:
             def loop():
@@ -145,7 +147,6 @@ class Porter:
 
             self.asyncthread = threading.Thread(target=loop, name="asyncio loop", daemon=True)
             self.asyncthread.start()
-
 
     def start_wsgi_server(self, port=0):
         if not port:
