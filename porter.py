@@ -27,7 +27,7 @@ import asyncio, json, logging, prometheus_client, requests, threading, time, yam
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
-import ambientweather, flo, lutron, neurio, purpleair, savant
+import ambientweather, flo, lutron, neurio, purpleair, rachio, savant
 import smartthings, tankutility, totalconnect
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
@@ -115,6 +115,9 @@ class Porter:
             lutronclient = lutron.LutronClient(self.config)
             module_to_client['lutron'] = lutronclient
             awaitables.add(lutronclient.poll())
+        if self.config.get('rachio'):
+            rclient = rachio.RachioClient(self.config)
+            module_to_client['rachio'] = rclient
         if self.config.get('tankutility'):
             tuclient = tankutility.TankUtilityClient(self.config)
             module_to_client['tankutility'] = tuclient
