@@ -220,7 +220,7 @@ class ComboxClient:
                         else:
                             anotherlabel, anothervalue = ['state'], [state]
                 g = makegauge(metric, desc, morelabels=anotherlabel)
-                g.add_metric(labelvalues + anothervalue, v)
+                g.add_metric(labelvalues + anothervalue, v/scale)
 
         return metric_to_gauge.values()
     
