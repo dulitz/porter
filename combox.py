@@ -145,7 +145,6 @@ class ComboxClient:
                 'CfgErrors': ('config_errors', 'number of configuration errors'),
 
                 # BATTMON
-                #'DcSrcID': (),
                 'BattV': ('battery_v', 'battery bank voltage', 1000.0),
                 'BattI': ('battery_a', 'battery bank charging current', 1000.0),
                 'BattT': ('battery_temp_c', 'battery bank temperature (degrees Celsius)'),
