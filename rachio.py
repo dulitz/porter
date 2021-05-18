@@ -110,19 +110,17 @@ class RachioClient:
                     zname = z.get('name', '')
                     morelabels = ['deviceId', 'nameLabel', 'zone', 'zonename']
                     labelvalues = [devid, devname, str(znum), zname]
-                    #last_duration = z.get('lastWateredDuration')
+                    last_duration = z.get('lastWateredDuration')
                     last_date = z.get('lastWateredDate')
-                    runtime = z.get('runtime')
-                    avail = z.get('availableWater')
+                    # these don't represent what I thought
+                    #runtime = z.get('runtime')
+                    #avail = z.get('availableWater')
                     if last_date:
                         g = makegauge('last_watered', 'when the zone was last watered (sec past epoch)', labels=morelabels)
                         g.add_metric(labelvalues, last_date/1000.0)
-                    if avail:
-                        g = makegauge('available_water', 'modeled water available (in)', labels=morelabels)
-                        g.add_metric(labelvalues, avail)
-                    if runtime:
-                        g = makegauge('zone_runtime', 'runtime of this zone (sec)', labels=morelabels)
-                        g.add_metric(labelvalues, runtime)
+                    if last_duration:
+                        g = makegauge('last_watered_duration_sec', 'duration of last watering (sec)', labels=morelabels)
+                        g.add_metric(labelvalues, last_duration)
         
         return metric_to_gauge.values()
 
