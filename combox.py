@@ -70,7 +70,7 @@ class ComboxClient:
                           str(d.get('MBAddr', '')), str(d.get('SerialNumber', ''))]
             g = makegauge('combox_info', 'attribute information association',
                           morelabels=infolabels)
-            g.add_metric(infovalues, 1)
+            g.add_metric(labelvalues + infovalues, 1)
 
             qual = {
                 0: 'not qualifying',
@@ -157,9 +157,9 @@ class ComboxClient:
                 'BattBtsPresent': ('temp_sensor_present', '1 if temp sensor is present, 0 otherwise'),
                 'BattTimeToDischarge': ('battery_duration_min', 'time until battery is discharged (min)'),
                 'AvgDischg': ('avg_discharge_duration_min', 'avg duration of discharge (min)'),
-                'AvgDischgPer': ('avg_discharge_pct', 'avg percentage discharge'),
+                'AvgDischgPer': ('avg_discharge_pct', 'avg percentage discharge', 100.0),
                 'DeepestDischg': ('deepest_discharge_ah', 'deepest discharge (Ah)'),
-                'DeepestDischgPer': ('deepest_discharge_pct', 'deepest percentage discharge'),
+                'DeepestDischgPer': ('deepest_discharge_pct', 'deepest percentage discharge', 100.0),
                 'CapacityRemoved': ('removed_ah', 'capacity removed (Ah)'),
                 'CapacityReturned': ('returned_ah', 'capacity returned (Ah)'),
                 'NumChgCycles': ('num_charge_cycles', 'number of charge cycles'),
