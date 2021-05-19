@@ -218,6 +218,8 @@ class Lipservice:
                 pass
             elif action == liplib.LipServer.Action.STOP:
                 pass
+            elif a == 'SHADEGRP' and action == liplib.LipServer.Action.PRESET:
+                pass # for Homeworks QS: activate the preset of a shade group
             elif action == 29 or action == 30:
                 # These are reported by Homeworks QS and possibly others (though NOT
                 # Radio Ra2 Select) and are not documented in the Homeworks Integration
@@ -229,7 +231,7 @@ class Lipservice:
                 #    if value is 11, it was caused by a motion sensor for "vacancy"
                 pass
             else:
-                LOGGER.warning(f'unknown ~OUTPUT action {action} for deviceid {deviceid} level {level}')
+                LOGGER.warning(f'unknown ~OUTPUT action {action} for deviceid {deviceid} level {level} on  {self.host}:{self.port}')
         elif a == 'GROUP':
             # emitted by Homeworks QS to show occupancy status of an occupancy sensor group.
             # param of 3 means occupied, 4 means unoccupied, 255 is unknown
@@ -237,14 +239,23 @@ class Lipservice:
             if action == 3:
                 val = 100 if param == 3 else 0 if param == 4 else -1
                 if val == -1:
-                    LOGGER.warning(f'unknown GROUP param {param} for deviceid {deviceid}')
+                    LOGGER.warning(f'unknown GROUP param {param} for deviceid {deviceid} on  {self.host}:{self.port}')
                 self.outputlevels[deviceid] = val
             else:
-                LOGGER.warning(f'unknown GROUP action {action} {param} for deviceid {deviceid}')
+                LOGGER.warning(f'unknown GROUP action {action} {param} for deviceid {deviceid} on {self.host}:{self.port}')
+        elif a == 'TIMECLOCK':
+            if action == 1:
+                pass # current timeclock mode
+            elif action == 2:
+                pass # sunrise
+            elif action == 3:
+                pass # sunset
+            elif action == 5:
+                pass # executing an indexed event
         elif a == 'ERROR':
-            LOGGER.error(f'~ERROR while polling: {b} {c} {d}')
+            LOGGER.error(f'~ERROR while polling {self.host}:{self.port}: {b} {c} {d}')
         else:
-            LOGGER.warning(f'unknown response while polling: {a} {b} {c} {d}')
+            LOGGER.warning(f'unknown response while polling {self.host}:{self.port}: {a} {b} {c} {d}')
         return self.poll() # return ourselves as coroutine so we are restarted
 
 class LipserviceManager:
