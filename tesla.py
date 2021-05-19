@@ -30,6 +30,7 @@ class TeslaClient:
             factor_selector = lambda factorlist: factorlist[0]
         verify = myconfig.get('verify', True)
         proxy = myconfig.get('proxy', '')
+        success = True
         if not password:
             success = False
             try:
@@ -38,14 +39,14 @@ class TeslaClient:
                     success = True
             except FileNotFoundError:
                 pass
-            if not success:
-                self.client = None
-                LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified')
-
-        self.client = teslapy.Tesla(user, password, passcode_getter=passcode_getter,
-                                    factor_selector=factor_selector,
-                                    verify=verify, proxy=proxy)
-        self.client.fetch_token()
+        if success:
+            self.client = teslapy.Tesla(user, password, passcode_getter=passcode_getter,
+                                        factor_selector=factor_selector,
+                                        verify=verify, proxy=proxy)
+            self.client.fetch_token()
+        else:
+            self.client = None
+            LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified')
 
     @REQUEST_TIME.time()
     def collect(self, target):
