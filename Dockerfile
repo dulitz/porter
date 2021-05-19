@@ -27,7 +27,7 @@ RUN chmod 700 /root/.ssh
 #   python tesla.py porter.yml
 # if porter.yml contains a tesla: top-level key which contains a user: email address.
 
-COPY cache.json /root
+COPY cache.json /home/porter
 
 RUN cp porter.yml /var/lib/porter/
 
