@@ -90,14 +90,12 @@ class LipServer:
     class Action(IntEnum):
         """Action values."""
 
-        # Get or Set Zone Level
-        SET = 1
-        # Start Raising
-        RAISING = 2
-        # Start Lowering
-        LOWERING = 3
-        # Stop Raising/Lowering
-        STOP = 4
+        SET      = 1    # Get or Set Zone Level
+        RAISING  = 2    # Start Raising
+        LOWERING = 3    # Start Lowering
+        STOP     = 4    # Stop Raising/Lowering
+
+        PRESET   = 6    # SHADEGRP for Homeworks QS
 
     class Button(IntEnum):
         """Button values."""
