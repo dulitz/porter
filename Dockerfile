@@ -23,6 +23,12 @@ WORKDIR /home/porter
 COPY known_hosts /root/.ssh/known_hosts
 RUN chmod 700 /root/.ssh
 
+# cache.json can be created by
+#   python tesla.py porter.yml
+# if porter.yml contains a tesla: top-level key which contains a user: email address.
+
+COPY cache.json /root
+
 RUN cp porter.yml /var/lib/porter/
 
 RUN pip3 install -r req.txt

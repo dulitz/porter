@@ -28,7 +28,7 @@ from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 
 import ambientweather, combox, flo, lutron, neurio, purpleair, rachio, savant
-import smartthings, tankutility, totalconnect
+import smartthings, tankutility, tesla, totalconnect
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server
 
@@ -123,6 +123,9 @@ class Porter:
         if self.config.get('tankutility'):
             tuclient = tankutility.TankUtilityClient(self.config)
             module_to_client['tankutility'] = tuclient
+        if self.config.get('tesla'):
+            tclient = tesla.TeslaClient(self.config)
+            module_to_client['tesla'] = tclient
         if self.config.get('totalconnect'):
             tcclient = totalconnect.TotalConnectClient(self.config)
             module_to_client['totalconnect'] = tcclient

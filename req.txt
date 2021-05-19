@@ -8,4 +8,5 @@ python-aqi
 python-dateutil
 pyflowater>=0.4.3
 requests
+teslapy
 total-connect-client
