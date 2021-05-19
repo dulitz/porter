@@ -18,6 +18,8 @@ REQUEST_TIME = prometheus_client.Summary('totalconnect_processing_seconds',
                                          'time of totalconnect requests')
 
 class TotalConnectClient:
+    RECREATE_AFTER_FAILURES = 5
+
     def __init__(self, config):
         self.config = config
         tcconfig = config.get('totalconnect')
@@ -31,6 +33,7 @@ class TotalConnectClient:
             raise Exception('no totalconnect password')
         self.client = None # creating this takes time so wait until the first request
         self.cv = threading.Condition()
+        self.consecutive_metadata_failures = 0
 
     def statename_for_arming_status(self, status):
         if status == 10200:
@@ -87,7 +90,16 @@ class TotalConnectClient:
         for loc in self.client.locations.values():
             with self.cv:
                 if not fresh_data:
-                    self.client.get_panel_meta_data(loc.location_id)
+                    try:
+                        self.client.get_panel_meta_data(loc.location_id)
+                        self.consecutive_metadata_failures = 0
+                    except Exception as e:
+                        self.consecutive_metadata_failures += 1
+                        if self.consecutive_metadata_failures > self.RECREATE_AFTER_FAILURES:
+                            LOGGER.warning(f'recreating client object after {self.consecutive_metadata_failures} consecutive failures')
+                            self.consecutive_metadata_failures = 0
+                            self.client = None
+                        raise
                 self._collect_from_location(loc, metric_to_gauge)
         return [v for v in metric_to_gauge.values()]
 
@@ -132,4 +144,5 @@ if __name__ == '__main__':
     assert len(sys.argv) == 2, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     client = TotalConnectClient(config)
+    client.collect('ignored')
     print(str(client.client))
