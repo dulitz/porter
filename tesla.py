@@ -5,7 +5,7 @@
 # see https://github.com/tdorssers/TeslaPy
 # and (unused here) https://github.com/mlowijs/tesla_api
 
-import json, logging, prometheus_client, teslapy, time, threading
+import json, logging, os, prometheus_client, teslapy, time, threading
 
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
@@ -30,6 +30,18 @@ class TeslaClient:
             factor_selector = lambda factorlist: factorlist[0]
         verify = myconfig.get('verify', True)
         proxy = myconfig.get('proxy', '')
+        if not password:
+            success = False
+            try:
+                with open('cache.json', 'r') as cfile:
+                    cache = json.load(cfile)
+                    success = True
+            except FileNotFoundError:
+                pass
+            if not success:
+                self.client = None
+                LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified')
+
         self.client = teslapy.Tesla(user, password, passcode_getter=passcode_getter,
                                     factor_selector=factor_selector,
                                     verify=verify, proxy=proxy)
@@ -43,6 +55,9 @@ class TeslaClient:
         """
         gmflist = []
         with self.cv:
+            if self.client is None:
+                LOGGER.error(f'tesla module ignoring target {target} as no API client exists')
+                return []
             self.client.fetch_token()
             for v in self.client.vehicle_list():
                 summary = v.get_vehicle_summary()
