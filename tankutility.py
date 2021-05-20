@@ -20,36 +20,38 @@ class TankUtilityClient:
     def __init__(self, config):
         self.config = config
         self.cv = threading.Condition()
-        self.tokentime = 0
+        self.target_to_tokentime = {}
         tuconfig = config.get('tankutility')
         if not tuconfig:
             raise Exception('no tankutility configuration')
-        if not tuconfig.get('user'):
-            raise Exception('no tankutility user')
-        if not tuconfig.get('password'):
-            raise Exception('no tankutility password')
+        if not tuconfig.get('credentials'):
+            raise Exception('no tankutility credentials')
         if not tuconfig.get('timeout'):
             tuconfig['timeout'] = 10
     
-    def _get_token(self):
+    def _get_token(self, target):
         """Only gets the token if it is halfway to its 24 hour expiration."""
         with self.cv:
-            if time.time() - self.tokentime < self.MAX_TOKEN_AGE:
-                return
-            user = self.config['tankutility']['user']
-            password = self.config['tankutility']['password']
+            (token, tokentime) = self.target_to_tokentime.get(target, (None, 0))
+            if time.time() - tokentime < self.MAX_TOKEN_AGE:
+                return token
+            password = self.config['tankutility']['credentials'].get(target)
+            if not password:
+                raise Exception(f'no tankutility credentials for {target}')
             timeout = self.config['tankutility']['timeout']
             resp = requests.get(f'{self.API_PREFIX}/getToken', timeout=timeout,
-                                auth=HTTPBasicAuth(user, password))
+                                auth=HTTPBasicAuth(target, password))
             resp.raise_for_status()
             if resp.status_code != 200:
+                # other 'success' statuses are not really success
                 raise Exception(f'unexpected status {resp.status_code}')
-            self.accesstoken = resp.json()['token']
-            self.tokentime = time.time()
+            accesstoken = resp.json()['token']
+            self.target_to_tokentime[target] = (accesstoken, time.time())
+            return accesstoken
 
-    def bearer_json_request(self, command, path, data=None):
-        self._get_token()
-        endpoint = f'{self.API_PREFIX}{path}?token={self.accesstoken}'
+    def bearer_json_request(self, target, command, path, data=None):
+        accesstoken = self._get_token(target)
+        endpoint = f'{self.API_PREFIX}{path}?token={accesstoken}'
         timeout = self.config['tankutility']['timeout']
         if data: # depending on command, data may not be allowed as an argument
             resp = command(endpoint, timeout=timeout, data=data)
@@ -75,9 +77,9 @@ class TankUtilityClient:
             metric_to_gauge[metric] = gmf
             return gmf
 
-        resp = self.bearer_json_request(requests.get, '/devices')
+        resp = self.bearer_json_request(target, requests.get, '/devices')
         for device in resp.get('devices', []):
-            d = self.bearer_json_request(requests.get, f'/devices/{device}').get('device', {})
+            d = self.bearer_json_request(target, requests.get, f'/devices/{device}').get('device', {})
             labelvalues = [d.get('short_device_id', device), d['name']]
             capacity = d.get('capacity')
             if capacity:
@@ -133,11 +135,12 @@ class TankUtilityClient:
 
 if __name__ == '__main__':
     import sys, yaml
-    assert len(sys.argv) == 2, sys.argv
+    assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     client = TankUtilityClient(config)
+    target = sys.argv[2]
 
-    resp = client.bearer_json_request(requests.get, '/devices')
+    resp = client.bearer_json_request(target, requests.get, '/devices')
     for device in resp.get('devices', []):
-        d = client.bearer_json_request(requests.get, f'/devices/{device}').get('device', {})
+        d = client.bearer_json_request(target, requests.get, f'/devices/{device}').get('device', {})
         print(d)
