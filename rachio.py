@@ -20,15 +20,13 @@ class RachioClient:
     def __init__(self, config):
         self.config = config
         self.cache_cv = threading.Condition()
-        self.cachetime = 0
+        self.target_cache = {}
 
-        self.zone_watering_secs_by_labelvalues = {}
-        self.fetchendtime = 0
         myconfig = config.get('rachio')
         if not myconfig:
             raise Exception('no rachio configuration')
-        if not myconfig.get('accesstoken'):
-            raise Exception('no rachio accesstoken')
+        if not myconfig.get('credentials'):
+            raise Exception('no rachio credentials')
         if not myconfig.get('timeout'):
             myconfig['timeout'] = 10
         if not myconfig.get('cachetime'):
@@ -39,9 +37,12 @@ class RachioClient:
         d[key] = newv
         return newv
 
-    def _bearer_json_request(self, command, path, data=None):
+    def _bearer_json_request(self, target, command, path, data=None):
         endpoint = f'{self.API_PREFIX}{path}'
-        headers = { 'Authorization': f"Bearer {self.config['rachio']['accesstoken']}",
+        token = self.config['rachio']['credentials'].get(target)
+        if token is None:
+            raise Exception(f'no rachio credentials for target {target}')
+        headers = { 'Authorization': f'Bearer {token}',
                     'Content-Type': 'application/json' }
         timeout = self.config['rachio']['timeout']
         if data: # depending on command, data may not be allowed as an argument
@@ -53,33 +54,36 @@ class RachioClient:
             return None
         return resp.json()
     
-    def _cache_refresh(self):
+    def _cache_refresh(self, target):
         with self.cache_cv:
-            if time.time() - self.cachetime > self.config['rachio']['cachetime']:
-                resp = self._bearer_json_request(requests.get, '/public/person/info')
-                self.cache_id = resp['id']
-                self.cache_info = self._bearer_json_request(requests.get, f'/public/person/{self.cache_id}')
-                self.cachetime = time.time()
-            return self.cache_info
+            (cacheid, cacheinfo, cachetime) = self.target_cache.get(target, (None, None, 0))
+            if time.time() - cachetime > self.config['rachio']['cachetime']:
+                resp = self._bearer_json_request(target, requests.get, '/public/person/info')
+                cacheid = resp['id']
+                cacheinfo = self._bearer_json_request(target, requests.get, f'/public/person/{cacheid}')
+                self.target_cache[target] = (cacheid, cacheinfo, time.time())
+            return cacheinfo
 
-    def get_info_cache(self):
-        return self._cache_refresh()
+    def get_info_cache(self, target):
+        return self._cache_refresh(target)
 
-    def get_info(self):
+    def get_info(self, target):
         now = time.time()
-        self._cache_refresh() # in case cache is empty
+        self._cache_refresh(target) # in case cache is empty
         with self.cache_cv:
-            if self.cachetime < now:
+            (cacheid, cacheinfo, cachetime) = self.target_cache[target] # refresh made sure this exists
+            if cachetime < now:
                 # then the cache did not refresh
-                self.cache_info = self._bearer_json_request(requests.get, f'/public/person/{self.cache_id}')
-                # we don't update cachetime because we didn't refetch self.cache_id
-            return self.cache_info
+                cache_info = self._bearer_json_request(target, requests.get, f'/public/person/{cache_id}')
+                self.target_cache[target] = (cacheid, cacheinfo, cachetime)
+                # we don't update cachetime because we didn't refetch cacheid
+            return cacheinfo
 
     def get_deviceids(self, info):
         return [d['id'] for d in info.get('devices', {})]
     
-    def get_events_for_device(self, deviceid, starting, ending=time.time()):
-        return self._bearer_json_request(requests.get, f'/public/device/{deviceid}/event?startTime={int(starting*1000)}&endTime={int(ending*1000)}')
+    def get_events_for_device(self, target, deviceid, starting, ending=time.time()):
+        return self._bearer_json_request(target, requests.get, f'/public/device/{deviceid}/event?startTime={int(starting*1000)}&endTime={int(ending*1000)}')
 
     @REQUEST_TIME.time()
     def collect(self, target):
@@ -96,7 +100,7 @@ class RachioClient:
             metric_to_gauge[metric] = gmf
             return gmf
 
-        for device in self.get_info().get('devices', []):
+        for device in self.get_info(target).get('devices', []):
             devid = device['id']
             devname = device.get('name', '')
             labelvalues = [devid, devname]
@@ -112,9 +116,6 @@ class RachioClient:
                     labelvalues = [devid, devname, str(znum), zname]
                     last_duration = z.get('lastWateredDuration')
                     last_date = z.get('lastWateredDate')
-                    # these don't represent what I thought
-                    #runtime = z.get('runtime')
-                    #avail = z.get('availableWater')
                     if last_date:
                         g = makegauge('last_watered', 'when the zone was last watered (sec past epoch)', labels=morelabels)
                         g.add_metric(labelvalues, last_date/1000.0)
@@ -127,14 +128,15 @@ class RachioClient:
 
 if __name__ == '__main__':
     import json, sys, yaml
-    assert len(sys.argv) == 2, sys.argv
+    assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     client = RachioClient(config)
+    target = sys.argv[2]
 
-    i = client.get_info_cache()
+    i = client.get_info_cache(target)
     print(json.dumps(i, indent=2))
 
-    for d in client.get_deviceids(client.get_info_cache()):
+    for d in client.get_deviceids(client.get_info_cache(target)):
         starting = time.time() - 86400
-        events = client.get_events_for_device(d, starting, time.time())
+        events = client.get_events_for_device(target, d, starting, time.time())
         print(json.dumps(events, indent=2))
