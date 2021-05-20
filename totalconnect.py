@@ -25,13 +25,9 @@ class TotalConnectClient:
         tcconfig = config.get('totalconnect')
         if not tcconfig:
             raise Exception('no totalconnect configuration')
-        user = tcconfig.get('user')
-        if not user:
-            raise Exception('no totalconnect user')
-        password = tcconfig.get('password')
-        if not password:
-            raise Exception('no totalconnect password')
-        self.client = None # creating this takes time so wait until the first request
+        if not tcconfig.get('credentials'):
+            raise Exception('no totalconnect credentials')
+        self.targetmap = {}
         self.cv = threading.Condition()
         self.consecutive_metadata_failures = 0
 
@@ -77,28 +73,32 @@ class TotalConnectClient:
     def collect(self, target):
         """get the status of each device at each location"""
 
-        tcconfig = self.config['totalconnect']
         fresh_data = False
         with self.cv:
-            if not self.client:
+            client = self.targetmap.get(target)
+            if not client:
+                password = self.config['totalconnect']['credentials'].get(target)
+                if password is None:
+                    raise Exception(f'no TotalConnect credentials for target {target}')
                 fresh_data = True
-                LOGGER.info(f'connecting to TotalConnect with user {tcconfig["user"]}...')
-                self.client = TCC.TotalConnectClient(tcconfig['user'], tcconfig['password'])
+                LOGGER.info(f'connecting to TotalConnect with user {target}...')
+                client = TCC.TotalConnectClient(target, password)
+                self.targetmap[target] = client
                 LOGGER.info('connected to TotalConnect')
 
         metric_to_gauge = {}
-        for loc in self.client.locations.values():
-            with self.cv:
+        with self.cv:
+            for loc in client.locations.values():
                 if not fresh_data:
                     try:
-                        self.client.get_panel_meta_data(loc.location_id)
+                        client.get_panel_meta_data(loc.location_id)
                         self.consecutive_metadata_failures = 0
                     except Exception as e:
                         self.consecutive_metadata_failures += 1
                         if self.consecutive_metadata_failures > self.RECREATE_AFTER_FAILURES:
                             LOGGER.warning(f'recreating client object after {self.consecutive_metadata_failures} consecutive failures')
                             self.consecutive_metadata_failures = 0
-                            self.client = None
+                            del self.targetmap[target]
                         raise
                 self._collect_from_location(loc, metric_to_gauge)
         return [v for v in metric_to_gauge.values()]
@@ -141,8 +141,9 @@ class TotalConnectClient:
 
 if __name__ == '__main__':
     import json, sys, yaml
-    assert len(sys.argv) == 2, sys.argv
+    assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     client = TotalConnectClient(config)
-    client.collect('ignored')
-    print(str(client.client))
+    target = sys.argv[2]
+    client.collect(target)
+    print(str(client.targetmap[target]))
