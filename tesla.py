@@ -32,18 +32,18 @@ class TeslaClient:
         proxy = myconfig.get('proxy', '')
         success = True
         if not password:
-            success = False
             try:
                 with open('cache.json', 'r') as cfile:
                     cache = json.load(cfile)
                     success = True
             except FileNotFoundError:
-                pass
+                success = False
         if success:
             self.client = teslapy.Tesla(user, password, passcode_getter=passcode_getter,
                                         factor_selector=factor_selector,
                                         verify=verify, proxy=proxy)
             self.client.fetch_token()
+            LOGGER.info('tesla client successfully authenticated')
         else:
             self.client = None
             LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified')
