@@ -49,9 +49,9 @@ class Consumption:
 
     def fetch_and_append(self, target_pyflo, lasttime):
         with self.cv:
-            return self._fetch_and_append_unlocked()
+            return self._fetch_and_append_locked(target_pyflo, lasttime)
 
-    def _fetch_and_append_unlocked(self, target_pyflo, lasttime):
+    def _fetch_and_append_locked(self, target_pyflo, lasttime):
         start = datetime.fromtimestamp(self.get_end_timestamp(), tz=timezone.utc).replace(minute=0, second=0, microsecond=0)
         end = lasttime.replace(minute=0, second=0, microsecond=0).astimezone(tz=timezone.utc)
         if end - start < timedelta(hours=1):
