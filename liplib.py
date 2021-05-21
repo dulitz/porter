@@ -102,6 +102,8 @@ class LipServer:
 
         PRESS = 3
         RELEASE = 4
+        HOLD = 5
+        DOUBLETAP = 6
 
     class State(IntEnum):
         """Connection state values."""
@@ -255,7 +257,7 @@ class LipServer:
             await self.writer.drain()
 
     async def logout(self):
-        """Logout and sever the connect to the bridge."""
+        """Logout and sever the connection to the bridge."""
         async with self._write_lock:
             if self._state != LipServer.State.Opened:
                 return
