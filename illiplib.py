@@ -88,7 +88,7 @@ class IlluminationClient:
 
     async def open(self, host, port=23, username=DEFAULT_USER,
                    password=DEFAULT_PASSWORD):
-        """Open a Telnet connection to the bridge."""
+        """Open a telnet connection to the controller."""
         async with self._read_lock:
             async with self._write_lock:
                 if self._state != IlluminationClient.State.Closed:
@@ -104,7 +104,7 @@ class IlluminationClient:
                 try:
                     connection = await asyncio.open_connection(host, port)
                 except OSError as err:
-                    _LOGGER.warning(f'error opening connection to the controller: {err}')
+                    _LOGGER.warning(f'error opening connection to Illumination {host}:{port}: {err}')
                     self._state = IlluminationClient.State.Closed
                     return
 
@@ -122,6 +122,7 @@ class IlluminationClient:
                     await self.writer.drain()
                     await self._read_until(b'monitoring enabled\r\n')
 
+                _LOGGER.info(f'opened Homeworks Illumination connection {host}:{port}')
                 self._state = IlluminationClient.State.Opened
 
     async def _read_until(self, value):
@@ -167,6 +168,8 @@ class IlluminationClient:
     async def read(self):
         """maps the result of read_raw() to correspond to the result of read() on liplib"""
         a, b, c, d = await self.read_raw()
+        if a is None:
+            return a, b, c, d
         if a == 'DL' or a == 'GSS':
             return 'OUTPUT', b, IlluminationClient.Action.SET, c
         (newa, newd) = self.RAWMAP.get(a, (None, None))
@@ -174,7 +177,7 @@ class IlluminationClient:
             if d is not None:
                 _LOGGER.warning(f'unexpected final field in {a} {b} {c} {d} with {newa} {newd}')
             return newa, b, c, newd
-        # we ignore:
+        # we pass through these without change:
         #   KLS, [01:06:12], 000011100000000000000000
         #   SVS, [01:06:03], 1, MOVING
         return a, b, c, d
@@ -223,7 +226,6 @@ class IlluminationClient:
             except OSError as err:
                 _LOGGER.warning("Error writing out to the bridge: %s", err)
 
-    # FIXME
     async def query(self, mode, integration, action):
         """Query a device to get its current state."""
         if hasattr(action, "value"):
