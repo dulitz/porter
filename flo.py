@@ -110,7 +110,7 @@ class FloClient:
             if target_pyflo is None:
                 raise FloException(f'no config credentials for target {target}')
             if time.time() > self.refresh_time:
-                self.locationsmap = { targ: pyf.locations() for (targ, pyf) in self.pyflomap }
+                self.locationsmap = { targ: pyf.locations() for (targ, pyf) in self.pyflomap.items() }
                 self.refresh_time = time.time() + 86400
             locations = [loc.copy() for loc in self.locationsmap[target]]
 
