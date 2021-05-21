@@ -38,6 +38,8 @@ class RequestError(Exception):
 LOGGER = logging.getLogger('porter')
 
 BAD_REQUEST_COUNT = prometheus_client.Counter('porter_bad_requests', 'number of bad requests')
+READ_TIMEOUT_COUNT = prometheus_client.Counter('porter_read_timeouts',
+                                               'number of read timeouts')
 CONNECT_FAIL_COUNT = prometheus_client.Counter('porter_connect_failures',
                                                'number of connection failures')
 BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses', 'number of bad responses')
@@ -77,19 +79,22 @@ class ProbeCollector(object):
         except json.JSONDecodeError as e:
             BAD_RESPONSE_COUNT.inc()
             self.log(e, path, params)
-        except requests.exceptions.HTTPError as e:
-            BAD_RESPONSE_COUNT.inc()
-            self.log(e, path, params)
+        except requests.exceptions.ReadTimeout as e:
+            READ_TIMEOUT_COUNT.inc()
+            LOGGER.info(f'during {path} {params} caught ReadTimeout: {str(e)}')
         except requests.exceptions.ConnectionError as e:
             CONNECT_FAIL_COUNT.inc()
             for t in targets:
                 if self.sshproxy.rewrite(t) != t:
                     self.sshproxy.restart_proxy_for(t)
-            self.log(e, path, params)
+            LOGGER.info(f'during {path} {params} caught ConnectionError: {str(e)}')
+        except requests.exceptions.HTTPError as e:
+            BAD_RESPONSE_COUNT.inc()
+            LOGGER.info(f'during {path} {params} caught HTTPError: {str(e)}')
         except RequestError as e:
             BAD_REQUEST_COUNT.inc()
             self.log(e, path, params)
-        assert False # self.log() should have raised
+
         yield GaugeMetricFamily('ignore', 'ignore')
 
     def log(self, ex, path, params):
