@@ -6,12 +6,12 @@
 # https://github.com/ambient-weather/api-docs/wiki/Device-Data-Specs
 
 
-import requests, prometheus_client, time
-
+import logging, requests, prometheus_client, time
 from prometheus_client.core import GaugeMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('ambientweather_processing_seconds',
                                          'time of ambientweather requests')
+LOGGER = logging.getLogger('porter.ambientweather')
 
 config = None # set by caller
 
@@ -37,6 +37,9 @@ def collect(target):
 
     for apikey in awconfig['apiKeys']:
         resp = requests.get("https://api.ambientweather.net/v1/devices?applicationKey={}&apiKey={}".format(awconfig['applicationKey'], apikey))
+        if resp.status_code == 401:
+            LOGGER.warning(f'(expected transient) status 401 for {resp}')
+            continue
         resp.raise_for_status()
 
         for sensor in resp.json(): # may raise ValueError
