@@ -247,6 +247,7 @@ class Lipservice:
             else:
                 LOGGER.warning(f'unknown GROUP action {action} {param} for deviceid {deviceid} on {self.host}:{self.port}')
         elif a == 'TIMECLOCK':
+            deviceid, component, action = int(b), int(c), int(d)
             if action == 1:
                 pass # current timeclock mode
             elif action == 2:
