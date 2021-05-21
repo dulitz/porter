@@ -6,8 +6,7 @@
 # see https://github.com/upsert/liplib
 # and https://www.lutron.com/TechnicalDocumentLibrary/040249.pdf
 
-import asyncio, json, liplib, logging, prometheus_client, time, threading
-
+import asyncio, illiplib, json, liplib, logging, prometheus_client, time, threading
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 LOGGER = logging.getLogger('porter.lutron')
@@ -142,10 +141,14 @@ class ConfigParams:
 
 class Lipservice:
     def __init__(self, host, port, cfparams):
-        self.lipserver = liplib.LipServer()
         self.host, self.port = host, port
         self.cfparams = cfparams
         self.last_ping = time.time()
+
+        if self.cfparams.get('system', 'modern').lower() == 'illumination':
+            self.lipserver = illiplib.IlluminationClient()
+        else: # any modern Lutron system
+            self.lipserver = liplib.LipServer()
 
         prompt = self.cfparams.get('prompt')
         if prompt:
@@ -252,6 +255,8 @@ class Lipservice:
                 pass # sunset
             elif action == 5:
                 pass # executing an indexed event
+        elif a == 'KLS' or a == 'SVS': # reported by Homeworks Illumination
+            pass # we ignore LED state and SVS scene actions
         elif a == 'ERROR':
             LOGGER.error(f'~ERROR while polling {self.host}:{self.port}: {b} {c} {d}')
         else:
@@ -353,7 +358,17 @@ if __name__ == '__main__':
     assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     client = LutronClient(config)
-    cfparams = ConfigParams(config.get('lutron'), 'ignored')
+    cfparams = ConfigParams(config.get('lutron'), sys.argv[2])
+
+    TESTING = False
+    if TESTING:
+        loop = asyncio.get_event_loop()
+        loop.set_debug(True)
+        coro = client.poll()
+        while True:
+            coro = loop.run_until_complete(coro)
+            print(str(client.collect(sys.argv[2])))
+        sys.exit(0)
 
     js = json.load(open(sys.argv[2], 'rt')) # the integration report from the bridge
     cfparams.process_integration_report(js)
