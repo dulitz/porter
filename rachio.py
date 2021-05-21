@@ -74,7 +74,7 @@ class RachioClient:
             (cacheid, cacheinfo, cachetime) = self.target_cache[target] # refresh made sure this exists
             if cachetime < now:
                 # then the cache did not refresh
-                cache_info = self._bearer_json_request(target, requests.get, f'/public/person/{cache_id}')
+                cache_info = self._bearer_json_request(target, requests.get, f'/public/person/{cacheid}')
                 self.target_cache[target] = (cacheid, cacheinfo, cachetime)
                 # we don't update cachetime because we didn't refetch cacheid
             return cacheinfo
