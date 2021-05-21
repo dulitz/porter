@@ -8,6 +8,10 @@ with overall organization inspired by
 
 see http://www.lutron.com/TechnicalDocumentLibrary/HWI%20RS232%20Protocol.pdf
 
+Note that Illumination only allows a small number of simultaneous telnet connections --
+on the order of 1 or 2. Beyond that, it will close connections silently with no
+error message. This shows up in our logs as many "Empty read from the bridge" messages
+and fewer "connection opened" messages.
 """
 
 import asyncio, logging, re
@@ -111,16 +115,23 @@ class IlluminationClient:
                 self.reader = connection[0]
                 self.writer = connection[1]
 
+                def cleanup(err):
+                    _LOGGER.warning(f'error opening connection to Illumination {host}:{port}: {err}')
+                    self._state = IlluminationClient.State.Closed
+
                 # do login
-                await self._read_until(b'LOGIN: ')
+                if await self._read_until(b'LOGIN: ') is False:
+                    return cleanup('no login prompt')
                 self.writer.write(username + b',' + password + b'\r\n')
                 await self.writer.drain()
-                await self._read_until(b'login successful\r\n')
+                if await self._read_until(b'login successful\r\n') is False:
+                    return cleanup('login failed')
 
                 for mon in [b'kbmon\r\n', b'dlmon\r\n', b'klmon\r\n', b'gsmon\r\n']:
                     self.writer.write(mon) # turn on monitoring
                     await self.writer.drain()
-                    await self._read_until(b'monitoring enabled\r\n')
+                    if await self._read_until(b'monitoring enabled\r\n') is False:
+                        return cleanup('set monitoring failed')
 
                 _LOGGER.info(f'opened Homeworks Illumination connection {host}:{port}')
                 self._state = IlluminationClient.State.Opened
