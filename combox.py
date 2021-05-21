@@ -1,10 +1,22 @@
-# combox.py
-#
-# the Schneider Conext Combox module for porter, the Prometheus exporter
-#
-# see Modbus Map for Schneider Conext XW: http://solar.schneider-electric.com/wp-content/uploads/2014/08/conext-modbus-map-conext-xw-device-503-0246-01-01_reva-3_eng.pdf
-# and https://41j5tc3akbrn3uezx5av0jj1bgm-wpengine.netdna-ssl.com/wp-content/uploads/2018/05/ML20180401_Conext-Battery-Monitor-Owners-Guide-975_0691_01_01_Rev-D_ENG.pdf
-# and http://solar.schneider-electric.com/wp-content/uploads/2014/05/503-0247-01-01_RevA.1_Modbus_Map_AGS_Device.pdf
+"""
+combox.py
+
+The Schneider Conext Combox module for porter, the Prometheus exporter.
+
+Tested with
+   webapp      version 2.0.874 built 2018/01/08 11:46:23
+   application version Ver03.08BN0874 built 2018-01-08_11-46-08
+   bootloader  version Ver01.04BN0128 built 2016-06-21_17-55-06
+
+Since this isn't a documented API and I just hacked it from looking at the
+internals of the webapp, it would ordinarily be considered "brittle." But
+the Combox is also discontinued and out of maintenance, so I wouldn't
+expect there to be any other firmware releases.
+
+See Modbus Map for Schneider Conext XW: http://solar.schneider-electric.com/wp-content/uploads/2014/08/conext-modbus-map-conext-xw-device-503-0246-01-01_reva-3_eng.pdf
+   and https://41j5tc3akbrn3uezx5av0jj1bgm-wpengine.netdna-ssl.com/wp-content/uploads/2018/05/ML20180401_Conext-Battery-Monitor-Owners-Guide-975_0691_01_01_Rev-D_ENG.pdf
+   and http://solar.schneider-electric.com/wp-content/uploads/2014/05/503-0247-01-01_RevA.1_Modbus_Map_AGS_Device.pdf
+"""
 
 import json, logging, requests, prometheus_client, time, threading
 
