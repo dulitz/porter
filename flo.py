@@ -114,6 +114,10 @@ class FloClient:
                 self.refresh_time = time.time() + 86400
             locations = [loc.copy() for loc in self.locationsmap[target]]
 
+        cmf = CounterMetricFamily('water_used_gal',
+                                  'water consumption through this valve (gal)',
+                                  labels=['macAddress', 'location', 'nameLabel'],
+                                  created=self.clientstarttime)
         metric_to_gauge = {}
 
         for loc in locations:
@@ -163,13 +167,6 @@ class FloClient:
 
                 c = self._get_consumption_object(deviceid, d['macAddress'], locname, dname)
                 c.fetch_and_append(target_pyflo, isoparse(d['lastHeardFromTime']))
-
-        cmf = CounterMetricFamily('water_used_gal',
-                                  'water consumption through this valve (gal)',
-                                  labels=['macAddress', 'location', 'nameLabel'],
-                                  created=self.clientstarttime)
-        for device in loc['devices']:
-            for c in self.deviceid_to_consumption[device['id']]:
                 c.add_metric(cmf)
                 
         return [v for v in metric_to_gauge.values()] + [cmf]
