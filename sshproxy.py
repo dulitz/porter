@@ -22,8 +22,8 @@ class SSHProxy:
             if type(keys) == type(''):
                 keys = [keys]
             self.identityfiles = [self._makeidentityfile(k) for k in keys]
-            self.command = ['ssh', '-aknxNT', '-p%d' % ours.get('sshport', 22)] + ['-i%s' % f for f in self.identityfiles]
-            self.rewrites = {k: tuple(v) for (k, v) in ours.items() if k != 'key' and k != 'port'}
+            self.command = ['ssh', '-aknxNT'] + ['-i%s' % f for f in self.identityfiles]
+            self.rewrites = {k: tuple(v) for (k, v) in ours.items() if k != 'key'}
             self.proxies = {}
             self.proxies_cv = threading.Condition()
 
