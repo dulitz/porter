@@ -134,7 +134,10 @@ class TotalConnectClient:
             g.add_metric(labelvalues2 + [status], zone.status)
             g = makegauge('alarm_zone_type', 'type of alarm zone', labels=(labels+['zonetype']))
             t = 'button' if zone.is_type_button() else 'security' if zone.is_type_security() else 'motion' if zone.is_type_motion() else 'fire' if zone.is_type_fire() else 'carbon monoxide' if zone.is_type_carbon_monoxide() else 'unknown'
-            g.add_metric(labelvalues2 + [t], zone.zone_type_id)
+            if zone.zone_type_id is None:
+                LOGGER.warning(f'zone_type_id was None for {labelvalues2}')
+            vv = -1 if zone.zone_type_id is None else zone.zone_type_id
+            g.add_metric(labelvalues2 + [t], vv)
             g = makegauge('alarm_zone_can_bypass', '1 if zone can be bypassed, 0 otherwise',
                           labels=labels)
             g.add_metric(labelvalues2, zone.can_be_bypassed)
