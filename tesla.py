@@ -1,9 +1,11 @@
-# tesla.py
-#
-# the Tesla module for porter, the Prometheus exporter.
-#
-# see https://github.com/tdorssers/TeslaPy
-# and (unused here) https://github.com/mlowijs/tesla_api
+"""
+tesla.py
+
+The Tesla module for porter, the Prometheus exporter.
+
+See https://github.com/tdorssers/TeslaPy
+and (unused here) https://github.com/mlowijs/tesla_api
+"""
 
 import json, logging, os, prometheus_client, teslapy, time, threading
 
@@ -23,6 +25,8 @@ class TeslaClient:
         myconfig = config.get('tesla')
         if not myconfig:
             raise Exception('no tesla configuration')
+        self.vehicle_cache = {}
+        self.vehicle_cache_time = myconfig.get('vehiclecachetime', 60*60)
         user = myconfig.get('user')
         if not user:
             raise Exception('no tesla user')
@@ -43,10 +47,11 @@ class TeslaClient:
                                         factor_selector=factor_selector,
                                         verify=verify, proxy=proxy)
             self.client.fetch_token()
-            LOGGER.info('tesla client successfully authenticated')
+            LOGGER.info(f'successfully authenticated {user}')
         else:
             self.client = None
-            LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified')
+            LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified for user {user}')
+
 
     @REQUEST_TIME.time()
     def collect(self, target):
@@ -57,15 +62,37 @@ class TeslaClient:
         gmflist = []
         with self.cv:
             if self.client is None:
-                LOGGER.error(f'tesla module ignoring target {target} as no API client exists')
+                LOGGER.error(f'ignoring target {target} for which we have no credentials')
                 return []
             self.client.fetch_token()
             for v in self.client.vehicle_list():
                 summary = v.get_vehicle_summary()
-                if summary.get('state', '').lower() == 'online' or target == summary.get('vin'):
-                    gmflist += self._collect_vehicle(v.get_vehicle_data())
+                now = time.time()
+                if target == summary.get('vin'):
+                    # then we were given the vin directly, so get fresh data even
+                    # if we wake the car up or keep it from going to sleep
+                    cache = self._collect_vehicle(v.get_vehicle_data())
+                    self.vehicle_cache[v] = (now, cache)
+                    gmflist += cache
+                elif summary.get('state', '').lower() == 'online':
+                    # This is the complicated case: we want to gather data
+                    # opportunistically, but not so often we keep the
+                    # vehicle awake. If it is online and we have no cache, then
+                    # something else woke it up and we should grab data now.
+                    # If our cache is too old, we refresh. Otherwise we return
+                    # cached data to make sure we don't wake the vehicle.
+                    (cachetime, cache) = self.vehicle_cache.get(v, (0, None))
+                    if now - cachetime > self.vehicle_cache_time:
+                        cache = self._collect_vehicle(v.get_vehicle_data())
+                        self.vehicle_cache[v] = (now, cache)
+                    gmflist += cache
                 else:
+                    # At this point we weren't given the vin directly and the car
+                    # is not online, so only return (known good) summary data.
+                    # We invalidate the cache because when the car comes back online
+                    # we should get fresh data, as someone else woke it up.
                     gmflist += self._collect_vehicle(summary)
+                    self.vehicle_cache[v] = (0, None)
             for b in self.client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
         return gmflist
