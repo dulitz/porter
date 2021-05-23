@@ -81,10 +81,10 @@ class TotalConnectClient:
                 if password is None:
                     raise Exception(f'no TotalConnect credentials for target {target}')
                 fresh_data = True
-                LOGGER.info(f'authenticating with user {target}')
+                LOGGER.info(f'authenticating user {target}')
                 client = TCC.TotalConnectClient(target, password)
                 self.targetmap[target] = client
-                LOGGER.info('connected')
+                LOGGER.info('{target} connected')
 
         metric_to_gauge = {}
         with self.cv:
