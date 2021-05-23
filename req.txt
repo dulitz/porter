@@ -7,6 +7,7 @@ prometheus_client
 python-aqi
 python-dateutil
 pyflowater>=0.4.3
+pytz
 requests
 teslapy
 total-connect-client

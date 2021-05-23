@@ -10,12 +10,10 @@ Tested with
 Since this isn't a documented API and I just hacked it from looking at the
 internals of the webapp, it should be expected to break whenever you
 update the device firmware.
-
-TODO: handle case where local time is not the same as the panel's time
 """
 
-import json, logging, requests, prometheus_client, time, threading
-from datetime import datetime, timezone
+import json, logging, requests, prometheus_client, time, threading, pytz
+from datetime import datetime
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
@@ -26,10 +24,11 @@ class NetaxsError(Exception):
     pass
 
 class Session:
-    def __init__(self, uri, user, password, timeout, verify=None):
+    def __init__(self, uri, user, password, timeout, verify=None, timezone=''):
         """The password must have already been hashed according to the NetAXS algorithm."""
         self.uri, self.user, self.password = uri, user, password
         self.timeout, self.verify = timeout, verify
+        self.timezone = pytz.timezone(timezone) if timezone else None
         self.session = None
         if self.uri.find('://') == -1:
             self.uri = f'https://{self.uri}'
@@ -105,7 +104,7 @@ class Session:
                 desc = 'Timezone Violation'
             else:
                 desc = 'type %s subtype %s' % (evtype, evsubtype)
-            ts = datetime(year=timedict['year'], month=timedict['month'], day=timedict['day'], hour=timedict['hour'], minute=timedict['min'], second=timedict['sec']).timestamp()
+            ts = self._localize(datetime(year=timedict['year'], month=timedict['month'], day=timedict['day'], hour=timedict['hour'], minute=timedict['min'], second=timedict['sec'])).timestamp()
             if ts < notbefore:
                 break
             out.append({
@@ -149,7 +148,8 @@ class Session:
                 notes = ''
             else:
                 (when, event_type, desc, notes) = values
-            ts = datetime.strptime(when.strip(), '%m/%d/%Y %H:%M:%S').timestamp()
+            ts = self._localize(datetime.strptime(
+                when.strip(), '%m/%d/%Y %H:%M:%S')).timestamp()
             if ts < notbefore:
                 break
             out.append({
@@ -196,14 +196,17 @@ class Session:
                 'note2': info1, # this is backwards, but info1 seems always empty in V6
                 'type': card_type,
                 'access': access_group.strip(';'),
-                'activation': datetime.strptime(activation_date, '%m/%d/%Y').timestamp(),
+                'activation': self._localize(datetime.strptime(
+                    activation_date, '%m/%d/%Y')).timestamp(),
             }
             if uses_remaining:
                 d['uses_remaining'] = int(uses_remaining)
             if expiration_date:
-                d['expiration'] = datetime.strptime(expiration_date, '%m/%d/%Y').timestamp()
+                d['expiration'] = self._localize(datetime.strptime(
+                    expiration_date, '%m/%d/%Y')).timestamp()
             if last_swiped_time:
-                d['last_swiped'] = datetime.strptime(last_swiped_time, '%m/%d/%Y %H:%M:%S').timestamp()
+                d['last_swiped'] = self._localize(datetime.strptime(
+                    last_swiped_time, '%m/%d/%Y %H:%M:%S')).timestamp()
             out.append(d)
         return out
 
@@ -222,7 +225,7 @@ class Session:
                 'firstname': firstname,
                 'pin': pin, # not coverted to int since this is often empty
                 'note1': note,
-                'activation': datetime(year=int(activatedYear), month=int(activatedMonth), day=int(activatedDay)).timestamp(),
+                'activation': self._localize(datetime(year=int(activatedYear), month=int(activatedMonth), day=int(activatedDay))).timestamp(),
                 'access': '' if is_expired else 'not expired',
             }
             if use_limited:
@@ -236,7 +239,7 @@ class Session:
             else:
                 d['type'] = 'card type %d' % card_type
             if has_expiration:
-                d['expiration'] = datetime(year=int(expiresYear), month=int(expiresMonth), day=int(expiresDay)).timestamp()
+                d['expiration'] = self._localize(datetime(year=int(expiresYear), month=int(expiresMonth), day=int(expiresDay))).timestamp()
             out.append(d)
         return out
     
@@ -245,6 +248,15 @@ class Session:
             'Referer': f'{self.uri}/views/home/index.lsp',
             'X-XSRF-TOKEN': self.session.cookies['XSRF-TOKEN']
         })
+
+    def _localize(self, dtime):
+        """Accepts a naive datetime dtime, in the timezone of self.timezone, and returns
+        an aware datetime in that same timezone. If self.timezone is None, just returns
+        dtime unchanged. Raises pytz.exceptions.AmbiguousTimeError if dtime is
+        ambiguous (during a Daylight Savings transition window)."""
+        if self.timezone is None:
+            return dtime
+        return self.timezone.localize(dtime)
 
     def _debug(self, where, response):
         """during debugging, this method writes request/response info"""
@@ -265,6 +277,8 @@ class NetaxsClient:
         self.cv = threading.Condition()
         self.targetmap = {}
         self.starttime = time.time()
+        # Prometheus counters only show an increase after the first value
+        self.known_lnpns = ['1/1', '2/2', '3/3'] # maybe expand these?
 
         myconfig = config.get('netaxs')
         if not myconfig:
@@ -306,7 +320,8 @@ class NetaxsClient:
                         pass
                 else:
                     LOGGER.warning(f'cannot find any verify file {verify} in search path {verifysearch}')
-            s = Session(target, user, password, timeout, verify=verify)
+            timezone = targetconfig.get('timezone', '')
+            s = Session(target, user, password, timeout, verify=verify, timezone=timezone)
             s.open()
             LOGGER.info(f'opened connection to {target}')
             s.last_porter = {
@@ -314,6 +329,11 @@ class NetaxsClient:
                 'cardnotfound': {}, 'cardfound': {}, 'card_timestamp': 0,
                 'eventid': 0, 'timestamp': self.starttime - 5,
             }
+            for vip in [True, False]:
+                s.last_porter['cardfound'][vip] = {}
+                for lnpn in self.known_lnpns:
+                    s.last_porter['cardfound'][vip][lnpn] = 0
+                    s.last_porter['cardnotfound'][lnpn] = 0
             self.targetmap[target] = s
         return s
     
@@ -364,8 +384,7 @@ class NetaxsClient:
                 low = d['description'].lower()
                 lp = f"{d.get('logical', '')}/{d.get('physical', '')}"
                 if 'card found' in low:
-                    m = getit(last['cardfound'],
-                              ('vip' in low, d.get('name', '')))
+                    m = getit(last['cardfound'], 'vip' in low)
                     self._increment(m, lp)
                 elif low == 'card not found':
                     self._increment(last['cardnotfound'], lp)
@@ -414,18 +433,16 @@ class NetaxsClient:
             gmf_invalid.add_metric([], last['invalidpasswords'])
             gmf_admin = makegauge('num_admin_logins', 'how many administrator logins')
             gmf_invalid.add_metric([], last['adminlogins'])
-            # last['cardfound'] is keyed by tuple (is_vip, name)
-            # and its value is a dictionary keyed by lnpn whose value
-            # is the count.
+            # last['cardfound'] is keyed by is_vip and its value
+            # is a dictionary keyed by lnpn whose value is the count.
             cmf_accepted = CounterMetricFamily(
                 'cards_accepted',
                 'number of card swipes that were accepted for access',
-                labels=['vip', 'lastname', 'lnpn'], created=self.starttime
+                labels=['vip', 'lnpn'], created=self.starttime
             )
-            for (isvipname, d) in last['cardfound'].items():
-                (is_vip, name) = isvipname
-                for (lnpn, count) in d.items():
-                    labels = ['1' if is_vip else '0', name, lnpn]
+            for is_vip in [True, False]:
+                for (lnpn, count) in last['cardfound'].get(is_vip, {}).items():
+                    labels = ['1' if is_vip else '0', lnpn]
                     cmf_accepted.add_metric(labels, count)
 
             cmf_rejected = CounterMetricFamily(
