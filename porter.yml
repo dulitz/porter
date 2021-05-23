@@ -1,6 +1,366 @@
-port: 8000
+############
+############ CONFIGURATION FILE FOR PORTER
+############
+#
+#
+# Porter is a Prometheus exporter which loads data from various consumer
+# "smart home" devices into Prometheus so you can create a Grafana dashboard
+# and set up alerts. This is especially useful if you have business or a second home,
+# if you're responsible for taking care of someone else's property (a parent's
+# home, for example), of if you rent property to others.
+#
+# Here are some useful things to do with Porter.
+#
+# 1. SmartThings sensors (leak detectors, door position
+# sensors, temperature sensors) generally perform well and are a good value.
+# But SmartThings doesn't provide a good way to get all that information
+# (e.g. temperatures of all your zones, or a count of how many doors are
+# unlocked) in one place. With Porter => Prometheus => Grafana you can do that.
+#
+# 2. SmartThings leak detectors make good temperature sensors for use in your
+# deep freeze or refrigerator, to send an alarm if it gets too warm. There
+# are decent alerting functions built into SmartThings, but it does not do
+# a good job of alerting you if the device goes offline and stops reporting.
+# Porter => Prometheus => Grafana lets you do that.
+#
+# 3. Battery powered sensors need their batteries replaced, but few systems
+# do a good job of telling you in advance (and reminding you) that particular
+# batteries need to be replaced. Porter => Prometheus => Grafana does that
+# well, especially for SmartThings.
+#
+# 4. Every device has its own app, so if you want to see the overall status
+# of everything you have to load a lot of apps -- and let's be honest, that
+# process is so annoying we almost never do it. Porter => Prometheus => Grafana
+# collects all the important information on one dashboard.
+# Check that dashboard when you go to bed and when you get up, and you can
+# be confident everything is okay.
+
+
+###### SERVING PORT (REQUIRED)
+#
+#
+# The TCP port on which Porter will listen to serve /metrics and /probe
+# requests from Prometheus.
+
+port: 6000
+
+
+###### SAMSUNG SMARTTHINGS
+#
+#
+# SmartThings provides control and monitoring of Zigbee devices (and Z-Wave
+# devices for some versions of the hub though many users found SmartThings
+# Z-Wave support to be unreliable). It supports the full range of Zigbee
+# devices from lights to door locks to shades and temperature sensors.
+#
+# Porter uses the SmartThings REST API (version 1.0-PREVIEW).
+#
+# To obtain a personal access token (for your personal SmartThings account),
+# visit https://account.smartthings.com/tokens , sign in with your Samsung
+# account, and request an access token.
+#
+# Porter will export information for all locations accessible with this
+# access token. If you gain permissions on a new location, you may need to
+# generate a new access token with permissions selected for the new location.
+# As far as I know there is no reason to use more than one access token.
+
+#smartthings:
+#  accesstoken: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+
+
+###### NEURIO a/k/a GENERAC PWRVIEW
+#
+#
+# Neurio (https://neur.io/) was purchased by Generac and renamed PWRview.
+# Tesla has installed Neurio devices as part of the Powerwall and Powerwall 2.
+# Regardless of its name, this system provides a real-time view of your
+# electrical power consumption and (if you have a solar system or genset)
+# generation.
+#
+# They offer an authenticated API but Porter doesn't use it. Instead Porter
+# connects to your device over the local network and requests data with no
+# authentication required. So there is no configuration to do here. In your
+# Prometheus config, scrape Porter with module "neurio" or "pwrview" and
+# the target of the IP or DNS name of your device om your local network.
+# You can scrape as many Neurios as you wish.
+
+
+###### FLO BY MOEN
+#
+#
+# Flo is an internet-connected water meter and water valve. Its app has
+# its own real-time alerting feature and can be made to shut off the valve
+# in case of leak, even without human intervention.
+#
+# Flo doesn't have a published API so you have to enter your actual
+# credentials here. You'll specify module "flo" and the target must
+# match the username of some credential in this list.
+#
+# Porter will export information for all locations accessible using any
+# of the credentials.
+
+#flo:
+#  credentials:
+#    'you@example.com': 'your_password_here'
+
+
+###### LUTRON LIGHTING and CONTROL SYSTEMS
+#
+#
+# FIXME
+
+lutron:
+  '192.168.1.10':
+     system: Illumination
+     user: your_telnet_username_goes_here
+     password: your_telnet_password_goes_here
+     areas:
+       'Entry': [[10615, 'Front Door Keypad', [1, 3, 5, 7, 19]], [101000301, 'Pendant'], [101010101, 'Downlights'], [101010102, 'Bridge Downlights']]
+
+  '192.168.1.20':
+     user: your_telnet_username_goes_here
+     password: your_telnet_password_goes_here
+     prompt: QNET
+     areas:
+       'Kitchen': [[166, 'Radiant Heat'], [177, 'Espresso']]
+
+  scenes:
+    1: 'All Off'
+    2: 'Welcome'
+    3: '4am'
+  areas:
+    'Back Deck': [[35, 'Back Porch Lights']]
+    'Den': [[28, 'Pico', [2, 3, 4, 5, 6]], [26, 'Main Lights'], [27, 'Accent Lights']]
+
+
+###### TESLA VEHICLES and POWERWALLS
+#
+#
+# FIXME
+
+#tesla:
+#  user: youremail@example.com
+#  ### tokenfile: /home/porter/cache.json
+
+
+###### TOTALCONNECT 2.0
+#
+#
+# TotalConnect 2.0 is used by Honeywell/Resideo alarm systems to report system status
+# in exchange for a monthly fee.
+#
+# Note that your TotalConnect 2.0 username is NOT your email address. The credentials
+# you use here should be the same credentials you use to sign in to
+# https://totalconnect2.com/ . ALSO NOTE that these credentials can be used to disarm
+# your alarm, so keep them safe.
+#
+# In your Prometheus config, the target should match one of the usernames in
+# the credentials here.
+
+#totalconnect:
+#  credentials:
+#    yourusername: 'yourpasswordhere'
+
+
+###### TANK UTILITY
+#
+#
+# Tank Utility provides a device that attaches to the "remote-ready" tank level
+# gauge on any tank (e.g. propane tank, fuel oil tank, water tank) and reports
+# the level via the internet.
+#
+# The Tank Utility API allows you to specify your email and password directly.
+# In your Prometheus config, the target should be an email that matches one of
+# the credentials here.
+
+#tankutility:
+#  credentials:
+#    'youremail@example.com': 'yourpasswordgoeshere'
+
+
+###### SAVANT PRO 7, 8, probably 9
+#
+#
+# FIXME
+
+savant:
+    names:
+       'Security System':
+          'unit': 'name'
+       'Lighting Controller':
+          243: Hot Tub Heater
+          265: 8th Floor Exhaust Fans
+          266: 9th Floor Exhaust Fans
+       'HVAC Controller A':
+          1: Guest Suite
+          2: Master Bedroom
+          3: Master Bath
+          4: Kitchen
+          5: Media Room
+          6: Dining Room
+  
+    suffixes:
+       - .RoomNumberOfLightsOn
+       - .RoomNumberOfShadesOpen
+       - .NumberOfSecurityFaults
+       - AUDIO.ServiceIsActive
+       - VIDEO.ServiceIsActive
+       - .CurrentTemperature
+       - .CurrentHumidity
+       - .IsPowered
+       - .OSVersion
+    prefixes:
+       - Security System.Security_system.IsArmedLEDOn
+       - Security System.Security_system.IsReadyLEDOn
+       - Security System.Security_system.IsTroubleLEDOn
+       - Security System.Security_system.CurrentZoneStatus_
+       - Lighting Controller.Lighting_controller.DimmerLevel
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentCoolPoint_1_, HVAC Controller.HVAC_controller.ThermostatCurrentCoolPoint_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentHeatPoint_1_, HVAC Controller.HVAC_controller.ThermostatCurrentHeatPoint_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentHumidifyPoint_1_, HVAC Controller.HVAC_controller.ThermostatCurrentHumidifyPoint_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentHumidity_1_, HVAC Controller.HVAC_controller.ThermostatCurrentHumidity_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentTemperature_1_, HVAC Controller.HVAC_controller.ThermostatCurrentTemperature_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentRemoteTemperature_1_, HVAC Controller.HVAC_controller.ThermostatCurrentRemoteTemperature_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentMode_1_, HVAC Controller.HVAC_controller.ThermostatCurrentMode_1_3]
+       - [HVAC Controller.HVAC_controller.ThermostatCurrentFanMode_1_, HVAC Controller.HVAC_controller.ThermostatCurrentFanMode_1_3]
+       - HVAC Controller A.HVAC_controller.ThermostatCurrentCoolPoint_
+       - HVAC Controller A.HVAC_controller.ThermostatCurrentHeatPoint_
+       - HVAC Controller A.HVAC_controller.ThermostatCurrentHumidity_
+       - HVAC Controller A.HVAC_controller.ThermostatCurrentTemperature_
+       - HVAC Controller A.HVAC_controller.ThermostatCurrentHumiditySetPoint_
+       - HVAC Controller A.HVAC_controller.ThermostatFanMode_
+       - HVAC Controller A.HVAC_controller.ThermostatFanStatus_
+       - HVAC Controller A.HVAC_controller.ThermostatHVACState_
+       - HVAC Controller A.HVAC_controller.ThermostatHumidityMode_
+       - HVAC Controller A.HVAC_controller.ThermostatMode_
+       - HVAC Controller A.HVAC_controller.ThermostatRelayA1Mode_
+       - HVAC Controller B.HVAC_controller.ThermostatCurrentCoolPoint_
+       - HVAC Controller B.HVAC_controller.ThermostatCurrentHeatPoint_
+       - HVAC Controller B.HVAC_controller.ThermostatCurrentHumidity_
+       - HVAC Controller B.HVAC_controller.ThermostatCurrentTemperature_
+       - HVAC Controller B.HVAC_controller.ThermostatCurrentHumiditySetPoint_
+       - HVAC Controller B.HVAC_controller.ThermostatFanMode_
+       - HVAC Controller B.HVAC_controller.ThermostatFanStatus_
+       - HVAC Controller B.HVAC_controller.ThermostatHVACState_
+       - HVAC Controller B.HVAC_controller.ThermostatHumidityMode_
+       - HVAC Controller B.HVAC_controller.ThermostatMode_
+       - HVAC Controller B.HVAC_controller.ThermostatRelayA1Mode_
+
+
+###### AMBIENT WEATHER
+#
+#
+# AmbientWeather offers internet-connected weather stations and wireless
+# temperature and humidity sensors. To export your data using Porter, you need
+# exactly one application key for your Porter instance, and then one API key
+# for every dashboard you want to access.
+#
+# To obtain keys (as of May 2021), visit your profile at
+#   https://ambientweather.net/account
+# At the bottom of the page there is a button to create an API key. Add that in
+# the apiKeys section below. There is also a link for developers to create an
+# Application Key; the link directs you to a form where you describe what you
+# want to do. Just say you want it for personal use to put it in a
+# Prometheus time-series database, and they should send you an Application Key
+# within one business day.
+#
+# Porter will export information for all locations accessible using any of
+# the API keys. There is no reason to use more than one Application Key.
 
 #ambientweather:
-   #applicationKey: a07...
-   #apiKeys:
-   #- e9...
+#  applicationKey: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+#  apiKeys:
+#  - fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+
+###### RACHIO
+#
+#
+# Rachio provides lawn-and-garden watering controllers that can be monitored and
+# controlled via an app.
+# FIXME
+
+#rachio:
+#  credentials:
+#    yourtargetname: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+
+
+###### HONEYwELL NETAXS-123
+#
+#
+# The NetAXS-123 is a door lock controller typically used by smaller
+# commercial spaces and some houses; it controls the access codes (for card
+# readers or keypads) for a maximum of 3 doors.
+#
+# FIXME
+
+#netaxs:
+#  verify: 'YourRoot.crt'
+#  verifysearch: ['/var/lib/porter/', '../']
+#  netaxs.example.com:
+#    user: operator
+#    password: hash_from_somewhere
+#    timezone: 'US/Pacific'
+#  otherone.example.com:
+#    user: operator
+#    password: hash
+#    timezone: 'US/Eastern'
+
+
+###### SCHNEIDER CONEXT COMBOX
+#
+#
+# The Conext ComBox from Schneider Electric is a DISCONTINUED product used
+# to monitor Schneider's XW series of solar/battery systems, including
+# inverter/chargers, solar charge controllers, battery monitors, and their
+# auto generator start system.
+# FIXME
+
+#combox:
+#  user: user
+#  password: your_password_goes_here
+
+
+###### SSH PROXY
+#
+#
+# Uncomment this section only if you want Porter to spawn an ssh to port forward
+# to reach particular targets.
+#
+# "key" is one or more private keys used to connect to the proxy ssh. See below.
+#
+# All other entries in the sshproxy dictionary must exactly match a target name.
+# Their values must be a vector with first value being the TCP port to connect
+# to on the target; the second value being the username and host to ssh to; and
+# the third value being the local address:port the ssh should listen on.
+#
+# If no entry exactly matches a target name, or if the sshproxy section is not
+# specified, Porter will connect to the target directly. Otherwise Porter will
+# fork and exec an ssh process in port forwarding mode:
+#   ssh -aknxNT -L localhost:8888:192.168.1.10:80 sshproxy@example.com
+#
+# If you need to specify additional options to ssh, such as a nonstandard port
+# number for the proxy host or a specific private key identity, create an ssh
+# configuration file (see ssh_config(5)) with an entry for the proxy host.
+#
+# Most users should not need to specify "key". Instead, put the private key for
+# the proxy in your ~/.ssh directory and create an ssh configuration file
+# with an IdentityFile directive for the proxy host. If you are running Porter
+# in a container (e.g. Docker), you may wish to build a container with no
+# keys or credentials or other sensitive information, and then provide this
+# configuration through a secure channel. In that case you may choose to
+# use "key" so that you need provide no additional secure data beyond this
+# configuration.
+
+#sshproxy:
+#   192.168.10.100: [80, 'sshproxy@bastion.example.com', 'localhost:7080']
+#   192.168.20.150: [23, 'sshproxy@bastion.example.com', 'localhost:7023']
+#
+# DO NOT USE the "key" section if you can use an ssh configuration file instead
+#   key: # ssh will select which of the private keys is appropriate for each host
+#      - |
+#        -----BEGIN OPENSSH PRIVATE KEY-----
+#        -----END OPENSSH PRIVATE KEY-----
+#      - |
+#        -----BEGIN OPENSSH PRIVATE KEY-----
+#        -----END OPENSSH PRIVATE KEY-----
