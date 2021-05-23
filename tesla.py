@@ -27,9 +27,9 @@ class TeslaClient:
             raise Exception('no tesla configuration')
         self.vehicle_cache = {}
         self.vehicle_cache_time = myconfig.get('vehiclecachetime', 60*60)
-        user = myconfig.get('user')
-        if not user:
-            raise Exception('no tesla user')
+        users = myconfig.get('users')
+        if not users:
+            raise Exception('no tesla users')
         if not factor_selector:
             factor_selector = lambda factorlist: factorlist[0]
         verify = myconfig.get('verify', True)
@@ -50,7 +50,7 @@ class TeslaClient:
             LOGGER.info(f'successfully authenticated {user}')
         else:
             self.client = None
-            LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified for user {user}')
+            LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified for user {users}')
 
 
     @REQUEST_TIME.time()
