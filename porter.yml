@@ -188,16 +188,12 @@ savant:
        'Security System':
           'unit': 'name'
        'Lighting Controller':
-          243: Hot Tub Heater
-          265: 8th Floor Exhaust Fans
-          266: 9th Floor Exhaust Fans
+          265: Exhaust Fans
+          266: Entry Downlights
        'HVAC Controller A':
           1: Guest Suite
-          2: Master Bedroom
-          3: Master Bath
-          4: Kitchen
+          2: Master Suite
           5: Media Room
-          6: Dining Room
   
     suffixes:
        - .RoomNumberOfLightsOn
