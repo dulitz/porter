@@ -1,8 +1,10 @@
-# totalconnect.py
-#
-# the TotalConnect module for porter, the Prometheus exporter
-#
-# see https://github.com/craigjmidwinter/total-connect-client
+"""
+totalconnect.py
+
+The TotalConnect module for porter, the Prometheus exporter.
+
+See https://github.com/craigjmidwinter/total-connect-client
+"""
 
 
 import logging, prometheus_client, threading, time
@@ -84,7 +86,7 @@ class TotalConnectClient:
                 LOGGER.info(f'authenticating user {target}')
                 client = TCC.TotalConnectClient(target, password)
                 self.targetmap[target] = client
-                LOGGER.info('{target} connected')
+                LOGGER.info(f'{target} connected')
 
         metric_to_gauge = {}
         with self.cv:
