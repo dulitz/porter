@@ -136,11 +136,29 @@ lutron:
 ###### TESLA VEHICLES and POWERWALLS
 #
 #
-# FIXME
+# Tesla. They often make good stuff, particularly their vehicles and Powerwall
+# home battery systems. They have an unofficial API.
+#
+# The users list below contains the emails of the Tesla accounts whose vehicles
+# and batteries you want to show. An authentication token for each of those
+# accounts must be stored in a file named "cache.json" in the current directory
+# of porter.py.
+#
+# To create cache.json, start by editing porter.yml to include all the users
+# you can authenticate. Then run:
+#      pyenv/bin/python tesla.py porter.yml
+# or using Docker:
+#      docker container exec [your_container_id] python3 tesla.py /var/lib/porter/porter.yml
+# which will prompt you for the password (and any second-factor codes) for
+# each account. When that command completes, cache.json in the current
+# directory will have all the necessary authentication tokens and can be
+# copied to the appropriate directory for use at runtime.
 
 #tesla:
-#  user: youremail@example.com
-#  ### tokenfile: /home/porter/cache.json
+#  users: ['youremail@example.com'] # can be a list of any length
+#  # You should not need to uncomment this, but if your vehicle won't stay asleep
+#  # make this value larger.
+#  #vehiclecachetime: 3600 # seconds
 
 
 ###### TOTALCONNECT 2.0
