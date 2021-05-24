@@ -57,7 +57,8 @@ class SSHProxy:
                 cmd = self.command + ['-L', '%s:%s:%d' % (localhostport, target, remoteport), userhost]
                 LOGGER.info(f'running {" ".join(cmd)}')
                 PROXY_COUNT.inc()
-                proxy = subprocess.Popen(cmd)
+                # we redirect stderr to stdout so Docker will log it
+                proxy = subprocess.Popen(cmd, stderr=subprocess.STDOUT)
                 time.sleep(1) # so ssh can start up
                 self.proxies[proxyspec] = proxy
         
@@ -81,8 +82,8 @@ class SSHProxy:
             with self.proxies_cv:
                 proxy = self.proxies.get(proxyspec)
                 if proxy:
-                    proxy.terminate()
-                    LOGGER.warning(f'proxy for {proxyspec} terminated due to failures on {target}')
+                    proxy.kill()
+                    LOGGER.warning(f'proxy for {proxyspec} killed due to failures on {target}')
 
     def terminate(self):
         if not self.rewrites:
