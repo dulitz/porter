@@ -304,9 +304,40 @@ savant:
 #
 # The NetAXS-123 is a door lock controller typically used by smaller
 # commercial spaces and some houses; it controls the access codes (for card
-# readers or keypads) for a maximum of 3 doors.
+# readers or keypads) for a maximum of 3 doors. It is always installed by a
+# professional installer.
 #
-# FIXME
+# The NetAXS-123 does not have a published API, so we scrape JSON from its
+# web interface. (This is fragile and should be expected to break when you
+# upgrade to a new firmware version.)
+#
+# Each target must appear exactly as a key in the "netaxs" section, and
+# each target must have "user" and "password" subkeys. Each target
+# shoud have a "timezone" subkey (with zones named from the Olson
+# database).
+#
+# If your NetAXS uses a TLS certificate from your own private Certificate
+# Authority, set "verify" to be a path to your private CA's root certificate;
+# see https://docs.python-requests.org/en/master/user/advanced/ for details.
+# If the root certificate is a relative path not beginning with "." and
+# there is a "verifysearch" key, the absolute paths in the verifysearch list
+# are tried in order to find the CA root certificate.
+#
+# You should use the most restricted NetAXS user (operator) for Porter,
+# although it isn't very restricted -- it can still generate new codes
+# that will unlock your doors, so keep this file safe. NetAXS will not
+# accept your password directly; it hashes your password first. To obtain
+# the hash, load the homepage of your NetAXS into Chrome when you are signed
+# out of the NetAXS. Once the login page has finished loading, start
+# Chrome Developer Tools from the "More Tools" submenu. Enter your username
+# and password, and press the Sign In button.
+#
+# Then select the Network tab in Developer Tools (it's to the right of
+# Elements, Console, Security, Sources...). Then click on the Headers
+# sub-tab. The first request will be for index.lsp. Highlight that
+# request and scroll down to the very bottom of the inspector where
+# you can see the Form Data. The value of the "ba_password" field is
+# the hash you should enter here in the "password" field.
 
 #netaxs:
 #  verify: 'YourRoot.crt'
@@ -328,7 +359,16 @@ savant:
 # to monitor Schneider's XW series of solar/battery systems, including
 # inverter/chargers, solar charge controllers, battery monitors, and their
 # auto generator start system.
-# FIXME
+#
+# The Combox does not have a published API, so we scrape JSON from its
+# web interface. (This is fragile and should be expected to break when you
+# upgrade to a new firmware version, except the Combox is discontinued so
+# there probably won't be any other firmware versions.)
+#
+# Set "user" and "password" to be your credentials for signing into the
+# combox; the Prometheus target should be the IP address or DNS name of
+# the combox itself. If all your comboxen use the same username/password,
+# you can export an unlimited number of comboxen.
 
 #combox:
 #  user: user
