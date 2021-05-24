@@ -327,10 +327,11 @@ class NetaxsClient:
             s.open()
             LOGGER.info(f'opened connection to {target}')
             s.last_porter = {
-                'adminlogins': 0, 'invalidpasswords': 0,
+                'adminlogins': 0, 'invalidpasswords': 0, 'dbupdates': {},
                 'cardnotfound': {}, 'cardfound': {}, 'card_timestamp': 0,
                 'eventid': 0, 'timestamp': self.starttime - 5,
             }
+            s.last_porter['dbupdates']['0/0'] = 0
             for vip in [True, False]:
                 s.last_porter['cardfound'][vip] = {}
                 for lnpn in self.known_lnpns:
@@ -390,6 +391,8 @@ class NetaxsClient:
                     self._increment(m, lp)
                 elif low == 'card not found':
                     self._increment(last['cardnotfound'], lp)
+                elif 'database update' in low:
+                    self._increment(last['dbupdate'], lp)
                 else:
                     LOGGER.info(f'{target}: unknown event type {low}: {d}')
             webevents = session.get_web_events(notbefore=last['timestamp'])
@@ -455,7 +458,15 @@ class NetaxsClient:
             for (lnpn, count) in last['cardnotfound'].items():
                 cmf_rejected.add_metric([lnpn], count)
 
-        return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected]
+            cmf_dbupdates = CounterMetricFamily(
+                'database_updates',
+                'number of database updates performed',
+                labels=['lnpn'], created=self.starttime
+            )
+            for (lnpn, count) in last['dbupdates'].items():
+                cmf_dbupdates.add_metric([lnpn], count)
+
+        return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates]
 
 
 if __name__ == '__main__':
