@@ -73,12 +73,14 @@ class TeslaClient:
             client.fetch_token() # refresh our token if needed
             for v in client.vehicle_list():
                 summary = v.get_vehicle_summary()
+                vkey = v['id_s'] # Vehicle is not hashable
                 now = time.time()
                 if target == summary.get('vin'):
                     # then we were given the vin directly, so get fresh data even
                     # if we wake the car up or keep it from going to sleep
+                    v.sync_wake_up()
                     cache = self._collect_vehicle(v.get_vehicle_data())
-                    self.vehicle_cache[v] = (now, cache)
+                    self.vehicle_cache[vkey] = (now, cache)
                     gmflist += cache
                 elif summary.get('state', '').lower() == 'online':
                     # This is the complicated case: we want to gather data
@@ -87,10 +89,10 @@ class TeslaClient:
                     # something else woke it up and we should grab data now.
                     # If our cache is too old, we refresh. Otherwise we return
                     # cached data to make sure we don't wake the vehicle.
-                    (cachetime, cache) = self.vehicle_cache.get(v, (0, None))
+                    (cachetime, cache) = self.vehicle_cache.get(vkey, (0, None))
                     if now - cachetime > self.vehicle_cache_time:
                         cache = self._collect_vehicle(v.get_vehicle_data())
-                        self.vehicle_cache[v] = (now, cache)
+                        self.vehicle_cache[vkey] = (now, cache)
                     gmflist += cache
                 else:
                     # At this point we weren't given the vin directly and the car
@@ -98,7 +100,7 @@ class TeslaClient:
                     # We invalidate the cache because when the car comes back online
                     # we should get fresh data, as someone else woke it up.
                     gmflist += self._collect_vehicle(summary)
-                    self.vehicle_cache[v] = (0, None)
+                    self.vehicle_cache[vkey] = (0, None)
             for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
         return gmflist
