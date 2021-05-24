@@ -25,12 +25,12 @@ RUN chmod 700 /root/.ssh
 
 # cache.json can be created by
 #   python tesla.py porter.yml
-# if porter.yml contains a tesla: top-level key which contains a user: email address.
+# if porter.yml contains a tesla: top-level key which contains a users: key with
+# a list of one or more email addresss.
 
-COPY cache.json /home/porter
-
+COPY cache.json /var/lib/porter/cache.json
+RUN ln -s /var/lib/porter/cache.json /home/porter/cache.json
 RUN cp porter.yml /var/lib/porter/
-
 RUN pip3 install -r req.txt
 
 CMD [ "python3", "porter.py", "/var/lib/porter/porter.yml" ]
