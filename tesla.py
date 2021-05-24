@@ -18,6 +18,14 @@ REQUEST_TIME = prometheus_client.Summary('tesla_processing_seconds',
                                          'time of tesla requests')
 
 
+def _authcache_valid_for(cache, email):
+    token = cache.get(email, {}).get('ownerapi', {})
+    if not token:
+        return False
+    now = time.time()
+    expires_at = token['created_at'] + token['expires_in']
+    return now < expires_at
+
 class TeslaClient:
     def __init__(self, config, password='', passcode_getter=None, factor_selector=None):
         self.config = config
@@ -30,27 +38,23 @@ class TeslaClient:
         users = myconfig.get('users')
         if not users:
             raise Exception('no tesla users')
-        if not factor_selector:
+        if not factor_selector: # then always select the first factor
             factor_selector = lambda factorlist: factorlist[0]
         verify = myconfig.get('verify', True)
         proxy = myconfig.get('proxy', '')
-        success = True
-        if not password:
+        self.usertoclient = {}
+        for user in users:
             try:
-                with open('cache.json', 'r') as cfile:
-                    cache = json.load(cfile)
-                    success = True
-            except FileNotFoundError:
-                success = False
-        if success:
-            self.client = teslapy.Tesla(user, password, passcode_getter=passcode_getter,
-                                        factor_selector=factor_selector,
-                                        verify=verify, proxy=proxy)
-            self.client.fetch_token()
+                c = teslapy.Tesla(
+                    user, password, passcode_getter=passcode_getter,
+                    factor_selector=factor_selector, verify=verify, proxy=proxy
+                )
+                c.fetch_token()
+            except ValueError: # could not authenticate
+                LOGGER.error(f'cache.json in {os.getcwd()} did not contain a valid token and we could not authenticate {user}')
+                raise
+            self.usertoclient[user] = c
             LOGGER.info(f'successfully authenticated {user}')
-        else:
-            self.client = None
-            LOGGER.error(f'cache.json not found in {os.getcwd()} and password not specified for user {users}')
 
 
     @REQUEST_TIME.time()
@@ -59,13 +63,15 @@ class TeslaClient:
         if it is, emit all the data. An offline vehicle is awakened only if its VIN is
         specifically a target.
         """
-        gmflist = []
         with self.cv:
-            if self.client is None:
-                LOGGER.error(f'ignoring target {target} for which we have no credentials')
-                return []
-            self.client.fetch_token()
-            for v in self.client.vehicle_list():
+            assert self.usertoclient
+            return self._collect_locked(target)
+
+    def _collect_locked(self, target):
+        gmflist = []
+        for (user, client) in self.usertoclient.items():
+            client.fetch_token() # refresh our token if needed
+            for v in client.vehicle_list():
                 summary = v.get_vehicle_summary()
                 now = time.time()
                 if target == summary.get('vin'):
@@ -93,7 +99,7 @@ class TeslaClient:
                     # we should get fresh data, as someone else woke it up.
                     gmflist += self._collect_vehicle(summary)
                     self.vehicle_cache[v] = (0, None)
-            for b in self.client.battery_list():
+            for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
         return gmflist
 
@@ -261,8 +267,6 @@ if __name__ == '__main__':
     import getpass, sys, yaml
     assert len(sys.argv) == 2, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
-    #password = getpass.getpass('Password for Tesla account:')
-    password = ''
 
     def passcode_getter():
         return raw_input('Passcode: ')
@@ -276,10 +280,36 @@ if __name__ == '__main__':
             except e:
                 print(e)
 
-    client = TeslaClient(config, password, factor_selector=factor_selector,
-                         passcode_getter=passcode_getter)
-    for v in client.client.vehicle_list():
-        print(v.get_vehicle_summary())
-        print(v.get_vehicle_data())
-    for b in client.client.battery_list():
-        print(str(b))
+    myconfig = config['tesla']
+    verify = myconfig.get('verify', True)
+    proxy = myconfig.get('proxy', '')
+    try:
+        with open('cache.json', 'r') as cfile:
+            cache = json.load(cfile)
+    except FileNotFoundError:
+        cache = {}
+        print(f'no cache found, authenticating all users {myconfig["users"]}')
+    for user in myconfig['users']:
+        if _authcache_valid_for(cache, user):
+            try:
+                c = teslapy.Tesla(user, '', passcode_getter=passcode_getter,
+                                  factor_selector=factor_selector,
+                                  verify=verify, proxy=proxy)
+                c.fetch_token()
+                continue
+            except ValueError:
+                pass
+        # cache is invalid; we need a password
+        password = getpass.getpass(f'Password for {user}: ')
+        c = teslapy.Tesla(user, password, passcode_getter=passcode_getter,
+                          factor_selector=factor_selector,
+                          verify=verify, proxy=proxy)
+        c.fetch_token()
+
+    client = TeslaClient(config, '')
+    for c in client.usertoclient.values():
+        for v in c.vehicle_list():
+            print(v.get_vehicle_summary())
+            print(v.get_vehicle_data())
+        for b in c.battery_list():
+            print(str(b))
