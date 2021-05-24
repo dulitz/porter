@@ -292,6 +292,8 @@ class NetaxsClient:
         return newv
 
     def _get_session(self, target):
+        if target == 'verify' or target == 'verifysearch' or target == 'timeout':
+            raise NetaxsError(f'netaxs target {target} is reserved and cannot be configured')
         s = self.targetmap.get(target)
         if s is None:
             targetconfig = self.config['netaxs'].get(target)
