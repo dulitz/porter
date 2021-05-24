@@ -91,6 +91,7 @@ class TeslaClient:
                     # cached data to make sure we don't wake the vehicle.
                     (cachetime, cache) = self.vehicle_cache.get(vkey, (0, None))
                     if now - cachetime > self.vehicle_cache_time:
+                        LOGGER.debug(f'refreshing cache for {vkey}')
                         cache = self._collect_vehicle(v.get_vehicle_data())
                         self.vehicle_cache[vkey] = (now, cache)
                     gmflist += cache
@@ -100,6 +101,8 @@ class TeslaClient:
                     # We invalidate the cache because when the car comes back online
                     # we should get fresh data, as someone else woke it up.
                     gmflist += self._collect_vehicle(summary)
+                    if self.vehicle_cache.get(vkey, (0, None))[0]:
+                        LOGGER.debug(f'invalidating cache for {vkey}')
                     self.vehicle_cache[vkey] = (0, None)
             for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
