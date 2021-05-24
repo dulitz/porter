@@ -459,7 +459,7 @@ class NetaxsClient:
                 cmf_rejected.add_metric([lnpn], count)
 
             cmf_dbupdates = CounterMetricFamily(
-                'database_updates',
+                'num_database_updates',
                 'number of database updates performed',
                 labels=['lnpn'], created=self.starttime
             )
