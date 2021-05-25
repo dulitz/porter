@@ -54,6 +54,14 @@ REQUEST_TIME = prometheus_client.Summary('lutron_processing_seconds',
 # Homeworks QS monitoring of ~OUTPUT and ~SHADEGRP.
 
 class ConfigParams:
+    """
+    We represent the configuration parameters for a single target. In production,
+    we parse the config to read either the integration report or the YAML
+    representation of the integration.
+
+    We can also dump our state in YAML form, which is useful in order to
+    convert the integration report into YAML form for easier understanding.
+    """
     def __init__(self, toplutronconfig, target):
         self.lutronconfig = toplutronconfig.get(target) or toplutronconfig
 
@@ -111,7 +119,8 @@ class ConfigParams:
 
     def _process_integration_yaml(self):
         """This processes the scenes and areas maps from the config to create the
-        deviceid maps. Never needs to be called by the client.
+        deviceid maps. Never needs to be called by the client because we do this
+        automatically.
         """
         self.sceneid_to_name = self.lutronconfig.get('scenes', {})
         self.areaname_to_devices = self.lutronconfig.get('areas', {})
@@ -138,6 +147,7 @@ class ConfigParams:
             lis = ['[%s]' % ', '.join([str(devid), "'%s'" % dname] + [str(b) for b in buttons]) for (devid, dname, *buttons) in t]
             out.append(("    '%s': [" % areaname) + ', '.join(lis) + ']')
         return '\n'.join(out)
+
 
 class Lipservice:
     def __init__(self, host, port, cfparams):
@@ -193,6 +203,8 @@ class Lipservice:
         return new_value
 
     async def poll(self):
+        """This method is misnamed. It doesn't poll, it blocks waiting
+        for the Lutron device to emit a state change message."""
         (a, b, c, d) = await self.lipserver.read()
         if a is None:
             await self.open()
@@ -340,6 +352,9 @@ class LutronClient:
                 level = lips.outputlevels[deviceid]
                 if level is not None:
                     (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+                    if name is None:
+                        # this can happen in Illumination, where dimmers are also sensors
+                        (name, area, buttons) = lips.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
                     gmf.add_metric([str(deviceid), name, area], level)
 
             for (sceneid, count) in lips.counts_by_scene_number.items():
