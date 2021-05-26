@@ -49,7 +49,7 @@ class IlluminationClient:
     # and CCOPULSE, CCOCLOSE, CCOOPEN to control contacts.
 
     class Action(IntEnum):
-        """Action values."""
+        """Action numbers for the OUTPUT command."""
 
         SET      = 1    # Get or Set Zone Level
         RAISING  = 2    # Start Raising
@@ -59,12 +59,14 @@ class IlluminationClient:
         PRESET   = 6    # SHADEGRP for Homeworks QS
 
     class Button(IntEnum):
-        """Button values."""
+        """Action numbers for the DEVICE command."""
 
         PRESS = 3
         RELEASE = 4
         HOLD = 5
         DOUBLETAP = 6
+
+        LEDSTATE = 9    # "Button" is a misnomer; this queries LED state
 
     class State(IntEnum):
         """Connection state values."""
@@ -155,21 +157,21 @@ class IlluminationClient:
             try:
                 read_data = await self.reader.read(IlluminationClient.READ_SIZE)
                 if not len(read_data):
-                    _LOGGER.warning("Empty read from the bridge (clean disconnect)")
+                    _LOGGER.info('controller disconnected')
                     return False
                 self._read_buffer += read_data
             except OSError as err:
-                _LOGGER.warning("Error reading from the bridge: %s", err)
+                _LOGGER.warning(f'error reading from controller: {err}')
                 return False
 
     RAWMAP = {
-        'KBP': ('DEVICE', Button.PRESS),
-        'KBR': ('DEVICE', Button.RELEASE),
-        'KBH': ('DEVICE', Button.HOLD),
+        'KBP':  ('DEVICE', Button.PRESS),
+        'KBR':  ('DEVICE', Button.RELEASE),
+        'KBH':  ('DEVICE', Button.HOLD),
         'KBDT': ('DEVICE', Button.DOUBLETAP),
-        'DBP': ('DEVICE', Button.PRESS),
-        'DBR': ('DEVICE', Button.RELEASE),
-        'DBH': ('DEVICE', Button.HOLD),
+        'DBP':  ('DEVICE', Button.PRESS),
+        'DBR':  ('DEVICE', Button.RELEASE),
+        'DBH':  ('DEVICE', Button.HOLD),
         'DBDT': ('DEVICE', Button.DOUBLETAP),
         'SVBP': ('DEVICE', Button.PRESS),
         'SVBR': ('DEVICE', Button.RELEASE),
@@ -219,23 +221,23 @@ class IlluminationClient:
         return None, None, None, None
 
     async def write(self, mode, integration, action, *args, value=None):
-        """Write a list of values out to the Telnet interface."""
+        """Write a list of values to the telnet interface."""
         if hasattr(action, "value"):
             action = action.value
         async with self._write_lock:
             if self._state != IlluminationClient.State.Opened:
                 return
-            data = "#{},{},{}".format(mode, integration, action)
+            data = f'#{mode},{integration},{action}'
             if value is not None:
-                data += ",{}".format(value)
+                data += f',{value}'
             for arg in args:
                 if arg is not None:
-                    data += ",{}".format(arg)
+                    data += f',{arg}'
             try:
                 self.writer.write((data + "\r\n").encode("ascii"))
                 await self.writer.drain()
             except OSError as err:
-                _LOGGER.warning("Error writing out to the bridge: %s", err)
+                _LOGGER.warning("Error writing to the controller: %s", err)
 
     async def query(self, mode, integration, action):
         """Query a device to get its current state."""
