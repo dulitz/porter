@@ -236,7 +236,7 @@ class LipServer:
 
 
     async def query(self, mode, integration, action):
-        """Query a device to get its current state."""
+        """Query a device to get its current state. Does not handle LED queries."""
         if hasattr(action, "value"):
             action = action.value
         _LOGGER.debug("Sending query %s, integration %s, action %s",
