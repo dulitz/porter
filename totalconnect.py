@@ -81,7 +81,7 @@ class TotalConnectClient:
             if not client:
                 password = self.config['totalconnect']['credentials'].get(target)
                 if password is None:
-                    raise Exception(f'no TotalConnect credentials for target {target}')
+                    raise Exception(f'no totalconnect credentials for target {target}')
                 fresh_data = True
                 LOGGER.info(f'authenticating user {target}')
                 client = TCC.TotalConnectClient(target, password)
@@ -92,6 +92,12 @@ class TotalConnectClient:
         with self.cv:
             for loc in client.locations.values():
                 if not fresh_data:
+                    if not client._populated:
+                        try:
+                            client.populate_details() # this may have failed earlier
+                        except Exception as e:
+                            LOGGER.info('caught exception in populate_details()')
+                            # no further processing here as we will keep trying
                     try:
                         client.get_panel_meta_data(loc.location_id)
                         self.consecutive_metadata_failures = 0
@@ -136,14 +142,10 @@ class TotalConnectClient:
             g.add_metric(labelvalues2 + [status], -1 if zone.status is None else zone.status)
             g = makegauge('alarm_zone_type', 'type of alarm zone', labels=(labels+['zonetype']))
             t = 'button' if zone.is_type_button() else 'security' if zone.is_type_security() else 'motion' if zone.is_type_motion() else 'fire' if zone.is_type_fire() else 'carbon monoxide' if zone.is_type_carbon_monoxide() else 'unknown'
-            if zone.zone_type_id is None:
-                LOGGER.warning(f'zone_type_id was None for {labelvalues2}')
             vv = -1 if zone.zone_type_id is None else zone.zone_type_id
             g.add_metric(labelvalues2 + [t], vv)
             g = makegauge('alarm_zone_can_bypass', '1 if zone can be bypassed, 0 otherwise',
                           labels=labels)
-            if zone.can_be_bypassed is None:
-                LOGGER.warning(f'zone.can_be_bypassed was None for {labelvalues2}')
             vv = -1 if zone.can_be_bypassed is None else zone.can_be_bypassed
             g.add_metric(labelvalues2, vv)
 
