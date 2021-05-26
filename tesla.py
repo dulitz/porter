@@ -161,6 +161,8 @@ class TeslaClient:
             'sun_roof_percent_open': 'sunroof_open_pct',
             }
         commonlabels = [vdata.get('vin', ''), vdata.get('display_name', ''), '']
+        gmf = makegauge('data_fetch_time', 'when this vehicle data was fresh')
+        gmf.add_metric(commonlabels, time.time())
         self._walk(vdata, makegauge, commonlabels, xlatemap)
 
         return metric_to_gauge.values()
