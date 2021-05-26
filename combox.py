@@ -28,6 +28,8 @@ LOGGER = logging.getLogger('porter.combox')
 
 REQUEST_TIME = prometheus_client.Summary('combox_processing_seconds',
                                          'time of combox requests')
+CRITICAL_ENTRY = prometheus_client.Gauge('combox_critical_section_entry_time',
+                                         'when the critical section was entered')
 
 
 class ComboxClient:
@@ -63,6 +65,7 @@ class ComboxClient:
             return gmf
 
         with self.cv:
+            CRITICAL_ENTRY.set_to_current_time()
             clientdevices = self.target_to_client.get(target)
             if clientdevices:
                 client, devices = clientdevices
@@ -72,6 +75,7 @@ class ComboxClient:
                 devices = client.get_devicelist()
                 self.target_to_client[target] = (client, devices)
             devinfos = [client.get_deviceinfo(d) for d in devices]
+            CRITICAL_ENTRY.set(0)
 
         for d in devinfos:
             if not d:
@@ -243,7 +247,6 @@ class ComboxWeb:
             uri = f'http://{uri}'
         self.uri, self.timeout, self.verify = uri, timeout, verify
         self.reconnect()
-        self.cv = threading.Condition()
     
     def reconnect(self):
         self.session = requests.Session()
@@ -251,7 +254,6 @@ class ComboxWeb:
         for name in ['Warning_ACKed_2', 'Warning_ACKed_3']:
             saw_warning_cookie = requests.cookies.create_cookie(domain=domain,name=name,value='1')
             self.session.cookies.set_cookie(saw_warning_cookie)
-        self.session.timeout = self.timeout
         self.session.verify = self.verify
     
     def _set_headers(self):
@@ -267,7 +269,7 @@ class ComboxWeb:
             'submit': 'Log In',
         }
         self._set_headers()
-        p = self.session.post('%s/login.cgi' % self.uri, data=authinfo)
+        p = self.session.post('%s/login.cgi' % self.uri, data=authinfo, timeout=self.timeout)
         p.raise_for_status()
         self._write('0duringlogin', p)
   
@@ -297,7 +299,7 @@ class ComboxWeb:
         """Not sure what these are good for if anything."""
         self._set_headers()
         # also xbsysvars.jgz which is different
-        sysvars = self.session.get('%s/meta/sysvars.jgz' % self.uri)
+        sysvars = self.session.get('%s/meta/sysvars.jgz' % self.uri, timeout=self.timeout)
         sysvars.raise_for_status()
         return sysvars.json()
     
@@ -313,7 +315,7 @@ class ComboxWeb:
     def _get_json(self, name):
         uri = '%s/gethandler.json?name=%s' % (self.uri, name)
         self._set_headers()
-        r = self.session.get(uri)
+        r = self.session.get(uri, timeout=self.timeout)
         r.raise_for_status()
         self._write('rjson', r)
         try:
@@ -322,7 +324,7 @@ class ComboxWeb:
             self.reconnect()
             self.login(self.user, self.password)
             self._set_headers()
-            r2 = self.session.get(uri)
+            r2 = self.session.get(uri, timeout=self.timeout)
             r2.raise_for_status()
             # if this fails again, we won't try to catch it
             js = self._dereference_and_clean(r2, name)
@@ -331,7 +333,7 @@ class ComboxWeb:
     def _get_vareqval(self, name):
         uri = '%s/gethandler.json?name=%s' % (self.uri, name)
         self._set_headers()
-        r = self.session.get(uri)
+        r = self.session.get(uri, timeout=self.timeout)
         r.raise_for_status()
         self._write('rvareqval', r)
         ret = []

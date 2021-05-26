@@ -38,11 +38,10 @@ class Session:
 
     def open(self):
         self.session = requests.Session()
-        self.session.timeout = self.timeout
         self.session.verify = self.verify
 
         authinfo = { 'user': self.user, 'pwd': self.password }
-        p = self.session.post(f'{self.uri}/lib/login.lsp', data=authinfo)
+        p = self.session.post(f'{self.uri}/lib/login.lsp', data=authinfo, timeout=self.timeout)
         p.raise_for_status()
         self._debug('duringlogin', p)
         r = p.json()
@@ -64,7 +63,7 @@ class Session:
 
         # the next post sets the actual signed-in cookies and/or sets the
         # application state to "signed in"
-        pp = self.session.post(f'{self.uri}/views/home/index.lsp', data={ 'ba_username': self.user, 'ba_password': self.password })
+        pp = self.session.post(f'{self.uri}/views/home/index.lsp', data={ 'ba_username': self.user, 'ba_password': self.password }, timeout=self.timeout)
         pp.raise_for_status()
         self._debug('afterlogin', pp)
   
@@ -78,7 +77,7 @@ class Session:
         postdata = {
             'filter': """{"t":2,"a":[],"b":[],"c":"0","d":"","e":[],"f":[],"l":200,"o":%d,"s":0}""" % start
         }
-        events = self.session.post(f'{self.uri}/models/events/getEvents.lsp', data=postdata)
+        events = self.session.post(f'{self.uri}/models/events/getEvents.lsp', data=postdata, timeout=self.timeout)
         events.raise_for_status()
         self._debug('events', events)
 
@@ -125,7 +124,7 @@ class Session:
         data = { 'filter':
                  """{"t":4,"a":[],"b":[],"c":0,"d":"","e":[],"f":[],"l":0,"o":%d,"s":0}""" % start
         }
-        p = self.session.post(f'{self.uri}/models/events/getEvents.lsp', data=data)
+        p = self.session.post(f'{self.uri}/models/events/getEvents.lsp', data=data, timeout=self.timeout)
         self._debug('prewebevents', p)
         p.raise_for_status()
         r = p.json()
@@ -134,7 +133,7 @@ class Session:
             raise NetaxsError(f'get_web_events got error status {r}')
 
         self._set_headers()
-        events = self.session.get(f'{self.uri}/models/WebEvents.csv')
+        events = self.session.get(f'{self.uri}/models/WebEvents.csv', timeout=self.timeout)
         self._debug('webevents', events)
         events.raise_for_status()
 
@@ -169,7 +168,7 @@ class Session:
             'oper': 0,
             'password': '',
         }
-        p = self.session.post(f'{self.uri}/models/where/upload/processFile.lsp', data=data)
+        p = self.session.post(f'{self.uri}/models/where/upload/processFile.lsp', data=data, timeout=self.timeout)
         p.raise_for_status()
         self._debug('precards', p)
         r = p.json()
@@ -178,7 +177,7 @@ class Session:
             raise NetaxsError(f'error status during get_cards: {r}')
 
         self._set_headers()
-        cards = self.session.get(f'{self.uri}/models/CardReport.csv')
+        cards = self.session.get(f'{self.uri}/models/CardReport.csv', timeout=self.timeout)
         cards.raise_for_status()
         self._debug('cards', cards)
 
@@ -213,7 +212,7 @@ class Session:
     def get_badges(self):
         """In V6, operator does not have permission to do this."""
         self._set_headers()
-        badges = self.session.post(f'{self.uri}/models/who/badge/getbadges.lsp')
+        badges = self.session.post(f'{self.uri}/models/who/badge/getbadges.lsp', timeout=self.timeout)
         badges.raise_for_status()
         self._debug('badges', badges)
 
