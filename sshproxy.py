@@ -24,7 +24,7 @@ class SSHProxy:
             self.identityfiles = [self._makeidentityfile(k) for k in keys]
             self.command = ['ssh', '-aknxNT'] + ['-i%s' % f for f in self.identityfiles]
             self.rewrites = {k: tuple(v) for (k, v) in ours.items() if k != 'key'}
-            self.proxies = {}
+            self.proxies, self.zombies = {}, []
             self.proxies_cv = threading.Condition()
 
     def _makeidentityfile(self, keystring):
@@ -48,7 +48,7 @@ class SSHProxy:
             proxy = self.proxies.get(proxyspec)
             if proxy:
                 r = proxy.poll()
-                if r:
+                if r is not None:
                     LOGGER.warning(f'sshproxy for {proxyspec} returned {r}; restarting')
                     RESTART_COUNT.inc()
                     proxy = None
@@ -84,11 +84,17 @@ class SSHProxy:
                 if proxy:
                     proxy.kill()
                     LOGGER.warning(f'proxy for {proxyspec} killed due to failures on {target}')
+                    self.proxies[proxyspec] = None
+                    if proxy.poll() is None:
+                        # this thing ought to be dead but we tried to wait for it and failed
+                        self.zombies.append(proxy)
 
     def terminate(self):
+        s = sum([1 for z in self.zombies if z.poll() is None])
+        LOGGER.warning(f'terminate() with {s} unwaited zombie children')
         if not self.rewrites:
             return # no proxies
         with self.proxies_cv:
             for p in self.proxies.values():
-                if not p.poll():
+                if p.poll() is not None:
                     p.terminate()
