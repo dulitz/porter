@@ -31,7 +31,7 @@ import ambientweather, combox, flo, lutron, netaxs
 import neurio, purpleair, rachio, savant
 import smartthings, tankutility, tesla, totalconnect
 from sshproxy import SSHProxy
-from prometheus import start_wsgi_server
+from prometheus import start_wsgi_server, SilentException
 
 class RequestError(Exception):
     pass
@@ -83,15 +83,18 @@ class ProbeCollector(object):
         except requests.exceptions.ReadTimeout as e:
             READ_TIMEOUT_COUNT.inc()
             LOGGER.info(f'during {path} {params} caught ReadTimeout: {str(e)}')
+            raise SilentException() # just fail the request, no more logging
         except requests.exceptions.ConnectionError as e:
             CONNECT_FAIL_COUNT.inc()
             for t in targets:
                 if self.sshproxy.rewrite(t) != t:
                     self.sshproxy.restart_proxy_for(t)
             LOGGER.info(f'during {path} {params} caught ConnectionError: {str(e)}')
+            raise SilentException() # just fail the request, no more logging
         except requests.exceptions.HTTPError as e:
             BAD_RESPONSE_COUNT.inc()
             LOGGER.info(f'during {path} {params} caught HTTPError: {str(e)}')
+            raise SilentException() # just fail the request, no more logging
         except RequestError as e:
             BAD_REQUEST_COUNT.inc()
             self.log(e, path, params)
