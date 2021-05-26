@@ -12,6 +12,10 @@ from prometheus_client.registry import REGISTRY
 from prometheus_client.exposition import choose_encoder
 
 
+class SilentException(Exception):
+    """This is used to fail a request with status 5xx"""
+    pass
+
 def registry_view_factory(parent, path, params):
     if not path.startswith('/probe'):
         return parent
@@ -48,12 +52,15 @@ def registry_view_factory(parent, path, params):
 def _bake_output(registry, accept_header, path, params, registry_view_factory):
     """Bake output for metrics output."""
     encoder, content_type = choose_encoder(accept_header)
-    if 'name[]' in params:
-        registry = registry.restricted_registry(params['name[]'])
-    if registry_view_factory:
-        registry = registry_view_factory(registry, path, params)
-    output = encoder(registry)
-    return str('200 OK'), (str('Content-Type'), content_type), output
+    try:
+        if 'name[]' in params:
+            registry = registry.restricted_registry(params['name[]'])
+        if registry_view_factory:
+            registry = registry_view_factory(registry, path, params)
+        output = encoder(registry)
+        return str('200 OK'), (str('Content-Type'), content_type), output
+    except SilentException:
+        return str('503 Server Error'), (str('Content-Type'), content_type), b''
 
 
 def make_wsgi_app(registry=REGISTRY, registry_view_factory=registry_view_factory):
