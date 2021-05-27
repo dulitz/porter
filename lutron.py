@@ -207,7 +207,11 @@ class Lipservice:
         for the Lutron device to emit a state change message."""
         (a, b, c, d) = await self.lipserver.read()
         if a is None:
+            # then we try to reconnect -- and since we may have missed
+            # state updates while we were disconnected, we call
+            # query_levels() to refresh our current state
             await self.open()
+            await self.query_levels()
         elif a == 'DEVICE':
             deviceid, component, action = int(b), int(c), int(d)
             self.last_ping = time.time()
