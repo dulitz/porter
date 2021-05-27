@@ -25,6 +25,7 @@ class RachioClient:
         self.cache_cv = threading.Condition()
         self.target_cache = {}
         self.zone_cache = {}
+        self.lasteventtime = self.clientstarttime
 
         myconfig = config.get('rachio')
         if not myconfig:
@@ -151,6 +152,10 @@ class RachioClient:
                         continue
                     seconds = mult * val
                     with self.cache_cv:
+                        eventtime = z.get('eventDate', 0) / 1000
+                        if eventtime <= self.lasteventtime:
+                            continue
+                        self.lasteventtime = eventtime
                         znum = self.zone_cache.get(zname, '')
                         if znum == '':
                             # It really shouldn't be because we just iterated
