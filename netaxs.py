@@ -37,6 +37,8 @@ class Session:
         self.cv = threading.Condition()
 
     def open(self):
+        if self.session:
+            return
         self.session = requests.Session()
         self.session.verify = self.verify
 
@@ -338,6 +340,17 @@ class NetaxsClient:
                     s.last_porter['cardnotfound'][lnpn] = 0
             self.targetmap[target] = s
         return s
+
+    def _retry_if_needed(self, session, func, tries=5):
+        while True:
+            try:
+                return func()
+            except json.decoder.JSONDecodeError:
+                session.close()
+                session.open()
+                tries -= 1
+                if tries == 0:
+                    raise
     
     @REQUEST_TIME.time()
     def collect(self, target):
@@ -356,7 +369,8 @@ class NetaxsClient:
             last = session.last_porter
             now = time.time()
             if now - last['card_timestamp'] > self.CARD_REFETCH_INTERVAL:
-                last['cards'] = { c['card']: c for c in session.get_cards() }
+                cards = self._retry_if_needed(session, lambda: session.get_cards())
+                last['cards'] = { c['card']: c for c in cards }
                 last['card_timestamp'] = now
 
             def getit(d, sub):
@@ -367,17 +381,8 @@ class NetaxsClient:
                 return r
 
             maxcompletedeventid = last['eventid']
-            events = None
-            tries = 10
-            while events is None:
-                try:
-                    events = session.get_events(notbefore=last['timestamp'])
-                except json.decoder.JSONDecodeError:
-                    session.close()
-                    session.open()
-                    tries -= 1
-                    if tries == 0:
-                        raise
+            events = self._retry_if_needed(
+                session, lambda: session.get_events(notbefore=last['timestamp']))
             for d in events:
                 eventid = d['id']
                 if eventid <= maxcompletedeventid:
