@@ -144,11 +144,11 @@ class RachioClient:
                     parsed = last.rstrip().rstrip('.').split(' ')
                     mult = 60 if parsed[-1] == 'minutes' else 1 if parsed[-1] == 'seconds' else -1
                     try:
-                        val = int(last[-2])
+                        val = int(parsed[-2])
                     except ValueError:
                         val = -1
                     if mult == -1 or val == -1:
-                        LOGGER.warning(f'could not parse zone summary {s}')
+                        LOGGER.warning(f'could not parse zone summary {s} with parsed {parsed} and val {val}')
                         continue
                     seconds = mult * val
                     with self.cache_cv:
