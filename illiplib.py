@@ -232,7 +232,7 @@ class IlluminationClient:
         return None, None, None, None
 
     async def write(self, mode, integration, action, *args, value=None):
-        """Write a list of values to the telnet interface."""
+        """Write a list of values to the controller."""
         if hasattr(action, "value"):
             action = action.value
         async with self._write_lock:
@@ -248,14 +248,13 @@ class IlluminationClient:
                 self.writer.write((data + "\r\n").encode("ascii"))
                 await self.writer.drain()
             except OSError as err:
-                _LOGGER.warning("Error writing to the controller: %s", err)
+                _LOGGER.warning(f'Error writing to the controller: {err}')
 
     async def query(self, mode, integration, action):
-        """Query a device to get its current state."""
+        """Query a device to get its current state. Does not handle LED queries."""
         if hasattr(action, "value"):
             action = action.value
-        _LOGGER.debug("Sending query %s, integration %s, action %s",
-                      mode, integration, action)
+        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}")
         async with self._write_lock:
             if self._state != IlluminationClient.State.Opened:
                 return
@@ -277,7 +276,7 @@ class IlluminationClient:
             await self.writer.drain()
 
     async def logout(self):
-        """Logout and sever the connection to the bridge."""
+        """Close the connection to the bridge."""
         async with self._write_lock:
             if self._state != IlluminationClient.State.Opened:
                 return
