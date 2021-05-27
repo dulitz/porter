@@ -209,12 +209,12 @@ class IlluminationClient:
                     address = int(match.group(2).decode('ascii').replace(':', ''))
                     return (match.group(1).decode('ascii'),
                             address, float(match.group(3)),
-                            match.group(4))
+                            fourth)
                 except ValueError:
-                    _LOGGER.warning("Exception in ", match.group(0))
+                    _LOGGER.warning("cannot convert: ", match.group(0))
         if match is False:
             # attempt to reconnect
-            _LOGGER.info("Reconnecting to the bridge %s", self._host)
+            _LOGGER.info(f'reconnecting to controller {self._host}')
             self._state = IlluminationClient.State.Closed
             await self.open(self._host, self._port, self._username,
                             self._password)
