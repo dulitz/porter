@@ -182,11 +182,14 @@ class Lipservice:
                                   password=self.cfparams.get('password').encode())
         self.last_ping = time.time()
 
-    async def query_levels(self):
+    async def open_and_query_levels(self):
         await self.open()
         # no need to hold the lock because we are in the async task thread
         for deviceid in self.outputlevels:
             await self.lipserver.query('OUTPUT', deviceid, 1)
+        # if we are in the tasks_pending set we were put there by poll(),
+        # so make sure we return to poll()
+        return self.poll()
 
     async def ping(self):
         ping_timeout = 10*60
@@ -207,11 +210,15 @@ class Lipservice:
         for the Lutron device to emit a state change message."""
         (a, b, c, d) = await self.lipserver.read()
         if a is None:
-            # then we try to reconnect -- and since we may have missed
-            # state updates while we were disconnected, we call
-            # query_levels() to refresh our current state
-            await self.open()
-            await self.query_levels()
+            # then try to reconnect -- and since we may have missed
+            # state updates while we were disconnected, we need to call
+            # open_and_query_levels() to refresh our current state. happily,
+            # open_and_query_levels() also reconnects us.
+            #
+            # remember that the way we have set up the wait() loop, when
+            # a task in the wait() loop finishes, we create a new task
+            # with the return value of the old task.
+            return self.open_and_query_levels()
         elif a == 'DEVICE':
             deviceid, component, action = int(b), int(c), int(d)
             self.last_ping = time.time()
@@ -310,12 +317,12 @@ class LipserviceManager:
             if not lips:
                 lips = Lipservice(host, port, cfparam)
                 self.hostport_to_lipservice[(host, port)] = lips
-                asyncio.create_task(lips.query_levels()) # only do this once
-                self.tasks_pending.add(asyncio.create_task(lips.poll()))
+                # open_and_query_levels() will return poll() so that's what we'll do next
+                self.tasks_pending.add(asyncio.create_task(lips.open_and_query_levels()))
                 self.tasks_pending.add(asyncio.create_task(lips.ping()))
         if self.tasks_pending:
-            (done, self.tasks_pending) = await asyncio.wait(self.tasks_pending, timeout=timeout,
-                                                            return_when=asyncio.FIRST_COMPLETED)
+            (done, self.tasks_pending) = await asyncio.wait(
+                self.tasks_pending, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 # as each poll() or ping() completes, schedule it to run again
                 self.tasks_pending.add(asyncio.create_task(task.result()))
