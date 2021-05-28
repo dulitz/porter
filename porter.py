@@ -26,6 +26,7 @@
 import asyncio, json, logging, prometheus_client, requests, threading, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
+from subprocess import TimeoutExpired
 
 import ambientweather, combox, flo, lutron, netaxs
 import neurio, purpleair, rachio, savant
@@ -98,6 +99,10 @@ class ProbeCollector(object):
         except RequestError as e:
             BAD_REQUEST_COUNT.inc()
             self.log(e, path, params)
+        except TimeoutExpired as e:
+            BAD_RESPONSE_COUNT.inc()
+            LOGGER.info(f'during {path} {params} caught subprocess.TimeoutExpired: {str(e)}')
+            raise SilentException() # just fail the request, no more logging
 
         yield GaugeMetricFamily('ignore', 'ignore')
 
