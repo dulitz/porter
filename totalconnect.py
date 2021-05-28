@@ -131,7 +131,10 @@ class TotalConnectClient:
         g.add_metric(labelvalues + [self.statename_for_arming_status(loc.arming_state)],
                      loc.arming_state)
         g = makegauge('last_updated', 'timestamp of last update time')
-        g.add_metric(labelvalues, loc.last_updated_timestamp_ticks / 1000000.0)
+        # it reports in Windows ticks (of course, it's a SOAP API), so we
+        # convert to Prometheus standard seconds-past-UNIX-epoch
+        upd = datetime(1, 1, 1) + timedelta(microseconds=loc.last_updated_timestamp_ticks/10)
+        g.add_metric(labelvalues, upd.timestamp())
 
         for (i, zone) in sorted(loc.zones.items()):
             labels = ['zoneid', 'zonename', 'partition']
@@ -141,8 +144,8 @@ class TotalConnectClient:
                           labels=(labels+['state']))
             g.add_metric(labelvalues2 + [status], -1 if zone.status is None else zone.status)
             g = makegauge('alarm_zone_type', 'type of alarm zone', labels=(labels+['zonetype']))
-            t = 'button' if zone.is_type_button() else 'security' if zone.is_type_security() else 'motion' if zone.is_type_motion() else 'fire' if zone.is_type_fire() else 'carbon monoxide' if zone.is_type_carbon_monoxide() else 'unknown'
             vv = -1 if zone.zone_type_id is None else zone.zone_type_id
+            t = 'delay' if vv == 1 else 'instant' if vv == 3 else 'motion' if vv == 4 else 'button' if zone.is_type_button() else 'security' if zone.is_type_security() else 'motion' if zone.is_type_motion() else 'fire' if zone.is_type_fire() else 'carbon monoxide' if zone.is_type_carbon_monoxide() else 'unknown'
             g.add_metric(labelvalues2 + [t], vv)
             g = makegauge('alarm_zone_can_bypass', '1 if zone can be bypassed, 0 otherwise',
                           labels=labels)
