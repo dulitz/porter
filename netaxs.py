@@ -271,14 +271,13 @@ class Session:
   
 
 class NetaxsClient:
-    CARD_REFETCH_INTERVAL = 3600 * 12
-    
     def __init__(self, config):
         self.config = config
         self.cv = threading.Condition()
         self.targetmap = {}
         self.starttime = time.time()
-        # Prometheus counters only show an increase after the first value
+        # Prometheus counters only show an increase after the first value, so
+        # we want to get a zero into the system as soon as we can
         self.known_lnpns = ['1/1', '2/2', '3/3'] # maybe expand these?
 
         myconfig = config.get('netaxs')
@@ -286,6 +285,8 @@ class NetaxsClient:
             raise Exception('no netaxs configuration')
         if not myconfig.get('timeout'):
             myconfig['timeout'] = 20
+        if not myconfig.get('card_refetch_interval'):
+            myconfig['card_refetch_interval'] = 0
 
     def _increment(self, d, key, increment=1):
         newv = d.get(key, 0) + increment
@@ -368,7 +369,7 @@ class NetaxsClient:
         with session.cv:
             last = session.last_porter
             now = time.time()
-            if now - last['card_timestamp'] > self.CARD_REFETCH_INTERVAL:
+            if now - last['card_timestamp'] > self.config['netaxs']['card_refetch_interval']:
                 cards = self._retry_if_needed(session, lambda: session.get_cards())
                 last['cards'] = { c['card']: c for c in cards }
                 last['card_timestamp'] = now
