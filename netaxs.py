@@ -86,25 +86,46 @@ class Session:
         out = []
         js = events.json()
         for (panel, evid, evtype, evsubtype, space, logical, physical, zero, device, code, lastname, timedict, secondzero, pin) in zip(*([iter(js)]*14)):
-            if int(evtype) == 1 and int(evsubtype) == 0:
-                desc = 'Card Found'
-            elif int(evtype) == 12 and int(evsubtype) == 0:
-                desc = 'VIP Card Found'
-            elif int(evtype) == 11 and int(evsubtype) == 1:
-                desc = 'Card Not Found: expired'
-            elif int(evtype) == 2 and int(evsubtype) == 1:
-                if int(space) == 1:
-                    desc = 'TAMPER'
+            try:
+                typeint, subtypeint = int(evtype), int(evsubtype)
+            except ValueError:
+                typeint, subtypeint = -1, -1
+            if typeint == 1:
+                if subtypeint == 0:
+                    if int(code) == 0:
+                        desc = 'online'
+                    else:
+                        desc = 'Card Found'
+                elif subtypeint == 2:
+                    desc = 'common database update'
+                elif subtypeint == 3:
+                    desc = 'panel database update [post-upgrade]'
                 else:
-                    desc = 'Card Not Found'
-            elif int(evtype) == 2 and int(evsubtype) == 2:
-                desc = 'panel database update'
-            elif int(evtype) == 1 and int(evsubtype) == 2:
-                desc = 'common database update'
-            elif int(evtype) == 5 and int(evsubtype) == 1:
-                desc = 'Timezone Violation'
+                    desc = f'unknown type 1 [good, found, success] subtype {evsubtype}'
+            elif typeint == 2:
+                if subtypeint == 0:
+                    desc = 'EVL controller offline'
+                elif subtypeint == 1:
+                    if int(space) == 1:
+                        desc = 'TAMPER'
+                    else:
+                        desc = 'Card Not Found'
+                elif subtypeint == 2:
+                    desc = 'panel database update [type 2]'
+                else:
+                    desc = f'unknown type 2 [offline, not found, bad] subtype {evsubtype}'
+            elif typeint == 12 and subtypeint == 0:
+                desc = 'VIP Card Found'
+            elif typeint == 11 and subtypeint == 1:
+                desc = 'Card Not Found: expired'
+            elif typeint == 142 and subtypeint == 0:
+                desc = 'firmware update in progress'
+            elif typeint == 130 and subtypeint == 1:
+                desc = 'panel restarted' # firmware revision in reader field
+            elif typeint == 5 and subtypeint == 1:
+                desc = 'timezone violation'
             else:
-                desc = 'type %s subtype %s' % (evtype, evsubtype)
+                desc = f'unknown type {evtype} subtype {evsubtype}'
             ts = self._localize(datetime(year=timedict['year'], month=timedict['month'], day=timedict['day'], hour=timedict['hour'], minute=timedict['min'], second=timedict['sec'])).timestamp()
             if ts < notbefore:
                 break
@@ -238,7 +259,7 @@ class Session:
             elif card_type == 0:
                 d['type'] = 'supervisor'
             else:
-                d['type'] = 'card type %d' % card_type
+                d['type'] = f'unknown card type {card_type}'
             if has_expiration:
                 d['expiration'] = self._localize(datetime(year=int(expiresYear), month=int(expiresMonth), day=int(expiresDay))).timestamp()
             out.append(d)
@@ -262,12 +283,12 @@ class Session:
     def _debug(self, where, response):
         """during debugging, this method writes request/response info"""
         return # not debugging now :)
-        with open('DEBUG-%s.html' % basename, 'w') as f:
+        with open(f'DEBUG-{basename}.html', 'w') as f:
             f.write(r.text)
-        with open('DEBUG-%s.requests' % basename, 'w') as f:
+        with open(f'DEBUG-{basename}.requests', 'w') as f:
             for h in r.history:
-                f.write('request %s %s\nresponse %d %s\n\n' % (h.url, h.request.headers, h.status_code, h.headers))
-            f.write('request %s %s\nresponse %d %s\n\n' % (r.url, r.request.headers, r.status_code, r.headers)) # dict(r.cookies)
+                f.write(f'request {h.url} {h.request.headers}\nresponse {h.status_code} {h.headers}\n\n')
+            f.write(f'request {r.url} {r.request.headers}\nresponse {r.status_code} {r.headers}\n\n')
   
 
 class NetaxsClient:
@@ -331,6 +352,7 @@ class NetaxsClient:
             s.last_porter = {
                 'adminlogins': 0, 'invalidpasswords': 0, 'dbupdates': {},
                 'cardnotfound': {}, 'cardfound': {}, 'card_timestamp': 0,
+                'unknowneventtypes': 0, 'tamper': 0,
                 'eventid': 0, 'timestamp': self.starttime - 5,
             }
             s.last_porter['dbupdates']['0/0'] = 0
@@ -398,8 +420,11 @@ class NetaxsClient:
                     self._increment(last['cardnotfound'], lp)
                 elif 'database update' in low:
                     self._increment(last['dbupdate'], lp)
+                elif 'tamper' in low:
+                    self._increment(last, 'tamper')
                 else:
                     LOGGER.info(f'{target}: unknown event type {low}: {d}')
+                    self._increment(last, 'unknowneventtypes')
             webevents = session.get_web_events(notbefore=last['timestamp'])
             for d in webevents:
                 low = d['type'].lower()
@@ -471,7 +496,21 @@ class NetaxsClient:
             for (lnpn, count) in last['dbupdates'].items():
                 cmf_dbupdates.add_metric([lnpn], count)
 
-        return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates]
+            cmf_unknown = CounterMetricFamily(
+                'num_unknown_events',
+                'number of events with unknown eventtypes',
+                labels=[], created=self.starttime
+            )
+            cmf_unknown.add_metric([], last['unknowneventtypes'])
+
+            cmf_tamper = CounterMetricFamily(
+                'num_tamper_events',
+                'number of tamper events',
+                labels=[], created=self.starttime
+            )
+            cmf_tamper.add_metric([], last['tamper'])
+
+        return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates, cmf_unknown, cmf_tamper]
 
 
 if __name__ == '__main__':
@@ -481,6 +520,16 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     client = NetaxsClient(config)
     target = sys.argv[2]
+
+    # useful if there is some kind of unknown event and you want to see
+    # what it looks like raw
+    if False:
+        session = client._get_session(target)
+        ts = time.time() - 4*3600 # last 4 hours
+        for e in session.get_events(notbefore=ts):
+            print(e)
+        for we in session.get_web_events(notbefore=ts):
+            print('webevent', we)
 
     while True:
         i = client.collect(target)
