@@ -7,7 +7,7 @@
 # see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html
 # and 
 
-import prometheus_client, requests, time, threading
+import json, prometheus_client, requests, time, threading
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
 
@@ -152,7 +152,7 @@ class SmartThingsClient:
                                       'when lock condition was changed', ['condition'],
                                       labelvalues + [value])
                     elif innerk == 'lockCodes':
-                        numvalid = len(value)
+                        numvalid = len(json.loads(value))
                         gmf = makegauge('num_access_cards',
                                         'number of access cards in the system',
                                         morelabels=['valid'])
