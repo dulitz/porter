@@ -7,8 +7,8 @@
 # see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html
 # and 
 
-import requests, prometheus_client, time, threading
-
+import prometheus_client, requests, time, threading
+from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
 
 # GET /locations
@@ -72,12 +72,11 @@ class SmartThingsClient:
         stconfig = self.config['smartthings']
 
         metric_to_gauge = {}
-        def makegauge(metric, desc, labels=None):
+        def makegauge(metric, desc, morelabels=[]):
             already = metric_to_gauge.get(metric)
             if already:
                 return already
-            if labels is None:
-                labels = ['deviceId', 'nameLabel', 'location', 'health']
+            labels = ['deviceId', 'nameLabel', 'location', 'health'] + morelabels
             gmf = GaugeMetricFamily(metric, desc, labels=labels)
             metric_to_gauge[metric] = gmf
             return gmf
@@ -116,31 +115,68 @@ class SmartThingsClient:
                     if unit == 'f': # convert to Celsius
                         unit = 'c'
                         value = round((float(value)-32)*5/9, 1)
+
+                    def add_timestamp(innerv, metricname, desc, morelabels, labelvalues):
+                        ts = innerv.get('timestamp')
+                        if ts:
+                            g = makegauge(metricname, desc, morelabels=morelabels)
+                            g.add_metric(labelvalues, isoparse(ts).timestamp())
+
                     if innerk == 'switch':
                         g = makegauge('switch_on', '1 if switch on, 0 if switch off, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'on' else 0 if value == 'off' else -1)
+                        add_timestamp(innerv, 'switch_state_timestamp',
+                                      'when switch state was changed', ['state'],
+                                      labelvalues + [value])
                     elif innerk == 'water':
                         g = makegauge('water_dry', '1 if dry, 0 if wet, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'dry' else 0 if value == 'wet' else -1)
+                        add_timestamp(innerv, 'water_condition_timestamp',
+                                      'when water condition was changed', ['condition'],
+                                      labelvalues + [value])
                     elif innerk == 'door' or innerk == 'contact':
                         g = makegauge('%s_closed' % innerk, '1 if closed, 0 if open, -1 otherwise')
                         g.add_metric(labelvalues, 1 if value == 'closed' else 0 if value == 'open' else -1)
+                        add_timestamp(innerv, 'door_condition_timestamp',
+                                      'when door condition was changed', ['condition'],
+                                      labelvalues + [value])
                     elif innerk == 'lock':
-                        g = makegauge('lock_locked', '1 if locked, 0 if unlocked, -1 otherwise')
-                        g.add_metric(labelvalues, 1 if value == 'locked' else 0 if value == 'unlocked' else -1)
+                        maybed = innerv.get('data', {})
+                        method = maybed.get('method') if isinstance(maybed, dict) else None
+                        g = makegauge('lock_locked',
+                                      '1 if locked, 0 if unlocked, -1 otherwise',
+                                      morelabels=[] if method is None else ['method'])
+                        g.add_metric(labelvalues + [str(method)],
+                                     1 if value == 'locked' else 0 if value == 'unlocked' else -1)
+                        add_timestamp(innerv, 'lock_changed_timestamp',
+                                      'when lock condition was changed', ['condition'],
+                                      labelvalues + [value])
+                    elif innerk == 'lockCodes':
+                        numvalid = len(value)
+                        gmf = makegauge('num_access_cards',
+                                        'number of access cards in the system',
+                                        morelabels=['valid'])
+                        gmf.add_metric(labelvalues + ['1'], numvalid)
+                        add_timestamp(innerv, 'access_cards_timestamp',
+                                      'when access cards were last changed', [], labelvalues)
                     elif unit == '%':
                         # innerk: battery, level
-                        g = makegauge('%s_pct' % innerk, 'percentage of full %s' % innerk)
+                        g = makegauge(f'{innerk}_pct', f'percentage of full {innerk}')
                         g.add_metric(labelvalues, float(value))
+                        add_timestamp(innerv, f'{innerk}_timestamp',
+                                      f'when {innerk} pct last changed', [], labelvalues)
                     elif unit == 'w' or unit == 'kwh' or unit == 'f' or unit == 'c':
                         # innerk: power, energy, temperature
-                        g = makegauge('%s_%s' % (innerk, unit), '%s (%s)' % (innerk, unit))
+                        g = makegauge(f'{innerk}_{unit}', f'{innerk} ({unit})')
                         g.add_metric(labelvalues, float(value))
+                        add_timestamp(innerv, f'{innerk}_timestamp',
+                                      f'when {innerk} last changed', [], labelvalues)
                     elif innerk == 'color' or innerk == 'hue' or innerk == 'saturation':
-                        g = makegauge('%s' % innerk, '%s of light' % innerk)
+                        g = makegauge(str(innerk), f'{innerk} of light')
                         g.add_metric(labelvalues, float(value))
-                    # ignoring innerk: threeAxis, acceleration, and things for locks
-                    # for locks, innerv['data'] is dict with 'method' key -- defines label
+                        add_timestamp(innerv, f'{innerk}_timestamp',
+                                      f'when {innerk} last changed', [], labelvalues)
+                    # ignoring innerk: threeAxis, acceleration
 
         return metric_to_gauge.values()
 
