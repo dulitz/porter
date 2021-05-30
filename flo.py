@@ -155,6 +155,8 @@ class FloClient:
                 g.add_metric(labelvalues, dprops['device_uptime_sec'])
                 g = makegauge('wifi_disconnections', 'device-reported count')
                 g.add_metric(labelvalues, dprops['wifi_disconnections'])
+                g = makegauge('num_reboots', 'number of reboots')
+                g.add_metric(labelvalues, d['reboot_count'])
                 g = makegauge('valve_actuations', 'count of valve actuations')
                 g.add_metric(labelvalues, dprops['valve_actuation_count'])
 
