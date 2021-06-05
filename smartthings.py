@@ -1,28 +1,27 @@
-# smartthings.py
-#
-# the SmartThings module for porter, the Prometheus exporter
-#
-# to get a Personal Access Token, visit https://account.smartthings.com/tokens
-#
-# see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html
-# and 
+"""
+smartthings.py
+
+The SmartThings module for porter, the Prometheus exporter.
+
+To get a Personal Access Token, visit https://account.smartthings.com/tokens
+
+See https://smartthings.developer.samsung.com/docs/api-ref/st-api.html
+"""
 
 import json, prometheus_client, requests, time, threading
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
 
-# GET /locations
-#     https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/listLocations
-# GET /locations/{locationid}/rooms
-#     https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/listRooms
-# GET /rules?locationId={locationId}
-#     https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#tag/Rules
-# GET /devices
-#     https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/getDevices
-# GET /devices/{deviceId}/status
-#     https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/getDeviceStatus
-# POST /devices/{deviceId}/commands
-#     https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/executeDeviceCommands
+"""
+GET /locations/{locationid}/rooms
+    https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/listRooms
+GET /rules?locationId={locationId}
+    https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#tag/Rules
+GET /devices/{deviceId}/status
+    https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/getDeviceStatus
+POST /devices/{deviceId}/commands
+    https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/executeDeviceCommands
+"""
 
 REQUEST_TIME = prometheus_client.Summary('smartthings_processing_seconds',
                                          'time of smartthings requests')
