@@ -1,10 +1,13 @@
-# lutron.py
-#
-# the Lutron module for porter, the Prometheus exporter.
-#    supports Radio Ra2 Select, Homeworks QS, and probably others
-#
-# see https://github.com/upsert/liplib
-# and https://www.lutron.com/TechnicalDocumentLibrary/040249.pdf
+"""
+lutron.py
+
+The Lutron module for porter, the Prometheus exporter.
+Supports Homeworks QS, Homeworks Illumination Radio Ra2, Radio Ra2 Select,
+Caseta PRO, and probably some others.
+
+See https://github.com/upsert/liplib
+and https://www.lutron.com/TechnicalDocumentLibrary/040249.pdf
+"""
 
 import asyncio, illiplib, json, liplib, logging, prometheus_client, time, threading
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
@@ -21,9 +24,9 @@ REQUEST_TIME = prometheus_client.Summary('lutron_processing_seconds',
 # when the Lutron device tells us an output level has changed, we update the gauge.
 # when the Lutron device tells us a press action has occurred, we increment the counter.
 #
-# a press action on deviceid 1 means that a scene was triggered, so we apply the scene_number
-# label (area and button are empty). for other deviceids, scene_number is empty and button
-# is the component that was pressed.
+# a press action on deviceid 1 means that a scene was triggered, so we apply the
+# scene_number label (area and button are empty). for other deviceids,
+# scene_number is empty and button is the component that was pressed.
 
 
 # Radio Ra2 Select supports the following parts of the Lutron Integration Protocol:
@@ -109,7 +112,8 @@ class ConfigParams:
             else: # then device is a sensor (Pico or occupancy sensor)
                 areaname = device.get('Area', {}).get('Name', '')
                 buttons = [b['Number'] for b in device.get('Buttons', [])]
-                self.deviceid_to_sensortuple[device['ID']] = (device['Name'], areaname, buttons)
+                self.deviceid_to_sensortuple[device['ID']] = (device['Name'],
+                                                              areaname, buttons)
                 add_device(areaname, (device['ID'], device['Name'], buttons))
 
         for device in lipidlist.get('Zones', []):
@@ -132,11 +136,12 @@ class ConfigParams:
                     self.deviceid_to_dimmertuple[deviceid] = (devicename, areaname)
                 else:
                     assert len(buttons) == 1, (deviceid, devicename, buttons)
-                    self.deviceid_to_sensortuple[deviceid] = (devicename, areaname, buttons[0])
+                    self.deviceid_to_sensortuple[deviceid] = (devicename,
+                                                              areaname, buttons[0])
 
     def dump_integration_yaml_string(self):
-        """Returns a YAML format string that reflects the integration. It's more compact
-        and easier to read than the integration JSON.
+        """Returns a YAML format string that reflects the integration.
+        It's more compact and easier to read than the integration JSON.
         """
         out = ['lutron:']
         out.append('  scenes:')
@@ -150,10 +155,13 @@ class ConfigParams:
 
 
 class Lipservice:
+    PING_TIME = 10*60 # number of seconds between keepalive pings
+    QUERY_TIME = 60*60 # number of seconds between resynchronization poll
+
     def __init__(self, host, port, cfparams):
         self.host, self.port = host, port
         self.cfparams = cfparams
-        self.last_ping = time.time()
+        self.last_ping, self.last_query = time.time(), time.time()
 
         if self.cfparams.get('system', 'modern').lower() == 'illumination':
             self.lipserver = illiplib.IlluminationClient()
@@ -183,16 +191,29 @@ class Lipservice:
         self.last_ping = time.time()
 
     async def open_and_query_levels(self):
-        await self.open()
+        await self.open() # sets self.last_ping
         # no need to hold the lock because we are in the async task thread
+        self.last_query = time.time()
         for deviceid in self.outputlevels:
+            # ActionNumber 1: get the current output level
             await self.lipserver.query('OUTPUT', deviceid, 1)
         # if we are in the tasks_pending set we were put there by poll(),
-        # so make sure we return to poll()
+        # so make sure we return to poll().
         return self.poll()
 
+    async def query_levels_periodic(self):
+        query_timeout = self.QUERY_TIME
+        while self.last_query + query_timeout > time.time():
+            await asyncio.sleep(self.last_query + query_timeout - time.time())
+        self.last_query = time.time()
+        self.last_ping = self.last_query
+        for deviceid in self.outputlevels:
+            # ActionNumber 1: get the current output level
+            await self.lipserver.query('OUTPUT', deviceid, 1)
+        return self.query_levels_periodic()
+
     async def ping(self):
-        ping_timeout = 10*60
+        ping_timeout = self.PING_TIME
         while self.last_ping + ping_timeout > time.time():
             await asyncio.sleep(self.last_ping + ping_timeout - time.time())
         self.last_ping = time.time()
@@ -262,6 +283,7 @@ class Lipservice:
             # emitted by Homeworks QS to show occupancy status of an occupancy sensor group.
             # param of 3 means occupied, 4 means unoccupied, 255 is unknown
             deviceid, action, param = b, c, d
+            self.last_ping = time.time()
             if action == 3:
                 val = 100 if param == 3 else 0 if param == 4 else -1
                 if val == -1:
@@ -271,6 +293,7 @@ class Lipservice:
                 LOGGER.warning(f'unknown GROUP action {action} {param} for deviceid {deviceid} on {self.host}:{self.port}')
         elif a == 'TIMECLOCK':
             deviceid, component, action = int(b), int(c), int(d)
+            self.last_ping = time.time()
             if action == 1:
                 pass # current timeclock mode
             elif action == 2:
@@ -280,12 +303,14 @@ class Lipservice:
             elif action == 5:
                 pass # executing an indexed event
         elif a == 'KLS' or a == 'SVS': # reported by Homeworks Illumination
+            self.last_ping = time.time()
             pass # we ignore LED state and SVS scene actions
         elif a == 'ERROR':
             LOGGER.error(f'~ERROR while polling {self.host}:{self.port}: {b} {c} {d}')
         else:
             LOGGER.warning(f'unknown response while polling {self.host}:{self.port}: {a} {b} {c} {d}')
         return self.poll() # return ourselves as coroutine so we are restarted
+
 
 class LipserviceManager:
     def __init__(self):
@@ -319,6 +344,7 @@ class LipserviceManager:
                 self.hostport_to_lipservice[(host, port)] = lips
                 # open_and_query_levels() will return poll() so that's what we'll do next
                 self.tasks_pending.add(asyncio.create_task(lips.open_and_query_levels()))
+                self.tasks_pending.add(asyncio.create_task(lips.query_levels_periodic()))
                 self.tasks_pending.add(asyncio.create_task(lips.ping()))
         if self.tasks_pending:
             (done, self.tasks_pending) = await asyncio.wait(
@@ -351,7 +377,8 @@ class LutronClient:
         lips = self.manager.get_lipservice_for_target(target)
         if not lips:
             return []
-        gmf = GaugeMetricFamily('output_level_pct', 'current output level (% of full output)',
+        gmf = GaugeMetricFamily('output_level_pct',
+                                'current output level (% of full output)',
                                 labels=['deviceId', 'name', 'area'])
         cmf = CounterMetricFamily(
             'press_actions', 'count of button presses and scene activations',
