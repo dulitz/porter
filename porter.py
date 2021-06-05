@@ -1,27 +1,43 @@
-# porter.py
-#
-# uses the multi-target exporter pattern -- see
-#    https://prometheus.io/docs/guides/multi-target-exporter/
-# and
-#    https://github.com/prometheus/client_python#custom-collectors
-# -- to connect various external services to Prometheus.
-#
-# the main advantage of this pattern is that the data is current at the time Prometheus
-# issues the query. also you can control the frequency of queries, and what is queried,
-# by editing only the Prometheus configuration. this exporter can just run forever in a
-# container.
-#
-# currently supports PurpleAir, Ambient Weather, SmartThings, Neurio/Generac PWRview,
-# Savant, and Flo by Moen.
-#
-# e.g. /probe&target=80845&module=purpleair
+"""
+porter.py
 
-# TODO: response code histograms
-# TODO: histograms of exceptions at top level
-# TODO: serve / with form for /probe along with recent statuses
-# TODO: serve /config to dump the configuration
-# TODO: move from hardcoded to config file
+Uses the multi-target exporter pattern described in
+   https://prometheus.io/docs/guides/multi-target-exporter/
+and
+   https://github.com/prometheus/client_python#custom-collectors
+to connect various external services to Prometheus.
 
+The main advantage of this pattern is that the data is current at the time Prometheus
+issues the query. Also you can control the frequency of queries, and what is queried,
+by editing only the Prometheus configuration. This exporter can just run forever in a
+container.
+
+Currently supports these HVAC, lighting, and A/V platforms:
+  SmartThings, Savant, Lutron (Homeworks QS, Homeworks Illumination,
+  Radio Ra 2, Radio Ra 2 Select, and Caseta PRO)
+
+these security systems:
+  Honeywell TotalConnect, Honeywell NetAXS-123
+
+these electrical, water, propane, and fuel oil monitors:
+  Flo by Moen, Neurio/Generac PWRview, Tank Utility, Schneider Conext Combox, Tesla
+
+these temperature and air quality monitors:
+  PurpleAir, Ambient Weather
+
+these irrigation systems:
+  Rachio
+
+and these cars:
+  Tesla
+
+It's pretty easy to add a new module.
+
+TODO: serve / with form for /probe along with recent statuses
+  e.g. /probe&target=80845&module=purpleair
+TODO: serve /config to dump the configuration
+TODO: move from hardcoded to config file
+"""
 
 import asyncio, json, logging, prometheus_client, requests, threading, time, yaml
 from prometheus_client.core import GaugeMetricFamily
@@ -39,12 +55,14 @@ class RequestError(Exception):
 
 LOGGER = logging.getLogger('porter')
 
-BAD_REQUEST_COUNT = prometheus_client.Counter('porter_bad_requests', 'number of bad requests')
+BAD_REQUEST_COUNT = prometheus_client.Counter('porter_bad_requests',
+                                              'number of bad requests')
 READ_TIMEOUT_COUNT = prometheus_client.Counter('porter_read_timeouts',
                                                'number of read timeouts')
 CONNECT_FAIL_COUNT = prometheus_client.Counter('porter_connect_failures',
                                                'number of connection failures')
-BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses', 'number of bad responses')
+BAD_RESPONSE_COUNT = prometheus_client.Counter('porter_bad_responses',
+                                               'number of bad responses')
 REQUEST_EXCEPTION_COUNT = prometheus_client.Counter('porter_request_exceptions', 'number of exceptions while processing a request')
 
 
@@ -70,6 +88,8 @@ class ProbeCollector(object):
         rawmodule = params.get('module')
         module = rawmodule[0] if rawmodule and len(rawmodule) == 1 else ''
 
+        if not targets:
+            raise RequestError('no targets specified')
         try:
             if module and path.startswith('/probe'):
                 for targetlist in self._probe_collect2(module, targets):
@@ -153,7 +173,7 @@ class Porter:
         module_to_client['pwrview'] = neurio
         purpleair.config = self.config
         module_to_client['purpleair'] = purpleair
-        REGISTRY.register(ProbeCollector(config, self.sshproxy, module_to_client))
+        REGISTRY.register(ProbeCollector(self.config, self.sshproxy, module_to_client))
         if awaitables:
             def loop():
                 async def async_loop():
@@ -175,9 +195,9 @@ class Porter:
         start_wsgi_server(port)
 
     def terminate_proxies(self):
-        # TODO: currently when a proxy terminates, long-running clients will be down until
-        # another probe comes in, because only probes can restart proxies. this should really
-        # terminate and restart all the proxies.
+        # TODO: Currently when a proxy terminates, long-running clients will be
+        # down until another probe comes in, because only probes can restart
+        # proxies. This should really terminate and restart all the proxies.
         self.sshproxy.terminate()
 
 def main(args):
