@@ -18,6 +18,8 @@ LOGGER = logging.getLogger('porter.totalconnect')
 
 REQUEST_TIME = prometheus_client.Summary('totalconnect_processing_seconds',
                                          'time of totalconnect requests')
+CRITICAL_ENTRY = prometheus_client.Gauge('totalconnect_critical_section_entry_time',
+                                         'when the critical section was entered')
 
 class TotalConnectClient:
     RECREATE_AFTER_FAILURES = 5
@@ -77,6 +79,7 @@ class TotalConnectClient:
 
         fresh_data = False
         with self.cv:
+            CRITICAL_ENTRY.set_to_current_time()
             client = self.targetmap.get(target)
             if not client:
                 password = self.config['totalconnect']['credentials'].get(target)
@@ -87,9 +90,11 @@ class TotalConnectClient:
                 client = TCC.TotalConnectClient(target, password)
                 self.targetmap[target] = client
                 LOGGER.info(f'{target} connected')
+            CRITICAL_ENTRY.set(0)
 
         metric_to_gauge = {}
         with self.cv:
+            CRITICAL_ENTRY.set_to_current_time()
             for loc in client.locations.values():
                 if not fresh_data:
                     if not client._populated:
@@ -109,6 +114,7 @@ class TotalConnectClient:
                             del self.targetmap[target]
                         raise
                 self._collect_from_location(loc, metric_to_gauge)
+            CRITICAL_ENTRY.set(0)
         return [v for v in metric_to_gauge.values()]
 
     def _collect_from_location(self, loc, metric_to_gauge):
