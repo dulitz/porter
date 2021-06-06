@@ -256,7 +256,7 @@ class IlluminationClient:
         """Query a device to get its current state."""
         if hasattr(action, "value"):
             action = action.value
-        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}, ignoring {params}")
+        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}, ignoring {ignored}")
         async with self._write_lock:
             if self._state != IlluminationClient.State.Opened:
                 return
