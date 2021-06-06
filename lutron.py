@@ -158,6 +158,10 @@ class Lipservice:
     PING_TIME = 10*60 # number of seconds between keepalive pings
     QUERY_TIME = 60*60 # number of seconds between resynchronization poll
 
+    # 80 is the magic number for seeTouch keypads;
+    # other keypads have a different magic number (ugh)
+    SEETOUCH_MAGIC = 80
+
     def __init__(self, host, port, cfparams):
         self.host, self.port = host, port
         self.cfparams = cfparams
@@ -165,8 +169,10 @@ class Lipservice:
 
         if self.cfparams.get('system', 'modern').lower() == 'illumination':
             self.lipserver = illiplib.IlluminationClient()
+            self.device_ledquery = True
         else: # any modern Lutron system
             self.lipserver = liplib.LipServer()
+            self.device_ledquery = False
 
         prompt = self.cfparams.get('prompt')
         if prompt:
@@ -177,7 +183,14 @@ class Lipservice:
         self.outputlevels = {}
         for deviceid in self.cfparams.deviceid_to_dimmertuple.keys():
             self.outputlevels[deviceid] = None
-        # Hold the lock if you are going to add a key to the three dictionaries
+        self.ledstates = {}
+        for (deviceid, tup) in self.cfparams.deviceid_to_sensortuple.items():
+            (name, area, buttons) = tup
+            if len(buttons) > 1: # then it's a keypad, not an Illumination dimmer
+                self.ledstates[deviceid] = {}
+                for button in buttons:
+                    self.ledstates[deviceid][button] = None
+        # Hold the lock if you are going to add a key to the four dictionaries
         # above, or if you are going to iterate over those dictionaries outside
         # of the async task thread.
         self.cv = threading.Condition()
@@ -193,23 +206,30 @@ class Lipservice:
     async def open_and_query_levels(self):
         await self.open() # sets self.last_ping
         # no need to hold the lock because we are in the async task thread
-        self.last_query = time.time()
-        for deviceid in self.outputlevels:
-            # ActionNumber 1: get the current output level
-            await self.lipserver.query('OUTPUT', deviceid, 1)
+        await self._query_levels()
         # if we are in the tasks_pending set we were put there by poll(),
         # so make sure we return to poll().
         return self.poll()
+
+    async def _query_levels(self):
+        self.last_query = time.time()
+        self.last_ping = self.last_query
+        for deviceid in self.outputlevels:
+            # Action.SET in a query gets the current output level
+            await self.lipserver.query('OUTPUT', deviceid, liplib.LipServer.Action.SET)
+        for (deviceid, cmap) in self.ledstates.items():
+            LEDSTATE = liplib.LipServer.Button.LEDSTATE
+            if self.device_ledquery:
+                await self.lipserver.query('DEVICE', deviceid, LEDSTATE)
+            else:
+                for button in cmap:
+                    await self.lipserver.query('DEVICE', deviceid, button+self.SEETOUCH_MAGIC, LEDSTATE)
 
     async def query_levels_periodic(self):
         query_timeout = self.QUERY_TIME
         while self.last_query + query_timeout > time.time():
             await asyncio.sleep(self.last_query + query_timeout - time.time())
-        self.last_query = time.time()
-        self.last_ping = self.last_query
-        for deviceid in self.outputlevels:
-            # ActionNumber 1: get the current output level
-            await self.lipserver.query('OUTPUT', deviceid, 1)
+        await self._query_levels()
         return self.query_levels_periodic()
 
     async def ping(self):
@@ -241,13 +261,24 @@ class Lipservice:
             # with the return value of the old task.
             return self.open_and_query_levels()
         elif a == 'DEVICE':
-            deviceid, component, action = int(b), int(c), int(d)
+            if isinstance(d, tuple):
+                deviceid, component, action, param = int(b), int(c), int(d[0]), float(d[1])
+            else:
+                deviceid, component, action = int(b), int(c), int(d)
             self.last_ping = time.time()
             if action == liplib.LipServer.Button.PRESS:
                 if deviceid == 1: # then a scene was triggered
                     count = self._increment_counter(self.counts_by_scene_number, component)
                 else: # a standalone device
                     count = self._increment_counter(self.counts_by_deviceid_component, (deviceid, component))
+            elif action == liplib.LipServer.Button.LEDSTATE:
+                if component > self.SEETOUCH_MAGIC and component < 20 + self.SEETOUCH_MAGIC:
+                    component -= self.SEETOUCH_MAGIC
+                cmap = self.ledstates.get(deviceid)
+                if cmap is None:
+                    cmap = {}
+                    self.ledstates[deviceid] = cmap
+                cmap[component] = int(param)
             # We ignore button releases even though that is where the action is taken.
             # Thus we also ignore double-press and long-press that can be reported
             # by Homeworks QS.
@@ -302,9 +333,20 @@ class Lipservice:
                 pass # sunset
             elif action == 5:
                 pass # executing an indexed event
-        elif a == 'KLS' or a == 'SVS': # reported by Homeworks Illumination
+        elif a == 'KLS': # reported by Homeworks Illumination
+            deviceid, ledstates = int(b), str(int(c))
             self.last_ping = time.time()
-            pass # we ignore LED state and SVS scene actions
+            leadingzeroes = 24 - len(ledstates)
+            cmap = self.ledstates.get(deviceid)
+            if cmap is None:
+                cmap = {}
+                self.ledstates[deviceid] = cmap
+            for z in range(leadingzeroes):
+                cmap[z+1] = 0
+            for (count, val) in enumerate(ledstates):
+                cmap[count+leadingzeroes+1] = int(val)
+        elif a == 'SVS': # reported by Illumination but illiplib doesn't support
+            self.last_ping = time.time()
         elif a == 'ERROR':
             LOGGER.error(f'~ERROR while polling {self.host}:{self.port}: {b} {c} {d}')
         else:
@@ -380,32 +422,41 @@ class LutronClient:
         gmf = GaugeMetricFamily('output_level_pct',
                                 'current output level (% of full output)',
                                 labels=['deviceId', 'name', 'area'])
+        gmfled = GaugeMetricFamily('led_state',
+                                   'current state of keypad LED',
+                                   labels=['deviceId', 'name', 'button', 'area'])
         cmf = CounterMetricFamily(
             'press_actions', 'count of button presses and scene activations',
-            labels=['deviceid', 'name', 'button', 'area', 'scene_number'],
+            labels=['deviceId', 'name', 'button', 'area', 'scene_number'],
             created=self.clientstarttime
         )
         with lips.cv:
-            for deviceid in lips.outputlevels.keys():
-                level = lips.outputlevels[deviceid]
+            for (deviceid, level) in lips.outputlevels.items():
                 if level is not None:
-                    (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+                    (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, (None, ''))
                     if name is None:
                         # this can happen in Illumination, where dimmers are also sensors
-                        (name, area, buttons) = lips.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
+                        (name, area, buttons) = cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', []))
                     gmf.add_metric([str(deviceid), name, area], level)
 
+            for (deviceid, cmap) in lips.ledstates.items():
+                (name, area, buttons) = cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', []))
+                for component in buttons:
+                    state = cmap.get(component)
+                    if state is not None:
+                        gmfled.add_metric([str(deviceid), name, str(component), area], state)
+
             for (sceneid, count) in lips.counts_by_scene_number.items():
-                name = lips.cfparams.sceneid_to_name.get(sceneid, '')
+                name = cfparams.sceneid_to_name.get(sceneid, '')
                 cmf.add_metric(['', name, '', '', str(sceneid)], count)
             for (tup, count) in lips.counts_by_deviceid_component.items():
                 (deviceid, component) = tup
-                (name, area, buttons) = lips.cfparams.deviceid_to_sensortuple.get(deviceid, (None, None, None))
+                (name, area, buttons) = cfparams.deviceid_to_sensortuple.get(deviceid, (None, '', []))
                 if name is None:
-                    (name, area) = lips.cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+                    (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
                 cmf.add_metric([str(deviceid), name, str(component), area], count)
 
-        return [gmf, cmf]
+        return [gmf, gmfled, cmf]
 
 if __name__ == '__main__':
     import sys, yaml
