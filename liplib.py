@@ -82,7 +82,7 @@ class LipServer:
     DEFAULT_PASSWORD = b"integration"
     DEFAULT_PROMPT = b"GNET> "
     LOGIN_PROMPT = b"login: "
-    RESPONSE_RE = re.compile(b"~([A-Z]+),([0-9.]+),([0-9.]+),([0-9.]+)\r\n")
+    RESPONSE_RE = re.compile(b"~([A-Z]+),([0-9.]+),([0-9.]+),([0-9.,]+)\r\n")
     OUTPUT = "OUTPUT"
     DEVICE = "DEVICE"
 
@@ -104,7 +104,7 @@ class LipServer:
         HOLD      = 5   # not returned by Caseta or Radio Ra 2 Select
         DOUBLETAP = 6   # not returned by Caseta or Radio Ra 2 Select
 
-        LEDSTATE = 9    # "Button" is a misnomer; this queries LED state
+        LEDSTATE  = 9   # "Button" is a misnomer; this queries LED state
 
     class State(IntEnum):
         """Connection state values."""
@@ -198,18 +198,25 @@ class LipServer:
                 return False
 
     async def read(self):
-        """Return a list of values read from the Telnet interface."""
+        """Return a list of values read from the telnet interface."""
         async with self._read_lock:
             if self._state != LipServer.State.Opened:
                 return None, None, None, None
             match = await self._read_until(LipServer.RESPONSE_RE)
             if match is not False:
-                # 1 = mode, 2 = integration number,
+                # when mode (1) is OUTPUT, 2 = integration number,
                 # 3 = action number, 4 = value
+                # when mode (1) is DEVICE, 2 = integration number,
+                # 3 = component number, 4 = action number,parameters
+                (action, comma, parameters) = match.group(4).partition(b',')
                 try:
+                    if comma:
+                        fourth = (int(action), int(parameters))
+                    else:
+                        fourth = float(action)
                     return match.group(1).decode("ascii"), \
                            int(match.group(2)), int(match.group(3)), \
-                           float(match.group(4))
+                           fourth
                 except ValueError:
                     _LOGGER.warning(f"could not parse {match.group(0)}")
         if match is False:
@@ -240,15 +247,16 @@ class LipServer:
                 _LOGGER.warning(f"Error writing to the bridge: {err}")
 
 
-    async def query(self, mode, integration, action):
-        """Query a device to get its current state. Does not handle LED queries."""
+    async def query(self, mode, integration, action, *params):
+        """Query a device to get its current state."""
         if hasattr(action, "value"):
             action = action.value
-        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}")
+        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}, params {params}")
         async with self._write_lock:
             if self._state != LipServer.State.Opened:
                 return
-            self.writer.write(f"?{mode},{integration},{action}\r\n".encode())
+            pval = ','.join([str(p) for p in params])
+            self.writer.write(f"?{mode},{integration},{action}{pval}\r\n".encode())
             await self.writer.drain()
 
     async def ping(self):

@@ -48,9 +48,10 @@ class IlluminationClient:
     # KBP, [01:06:12],  5    [also KBR, KBH, KBDT, DBP, DBR, DBH, DBDT, SVBP, SVBR, SVBH, SVBDT]
     # DL, [01:04:02:06],   0.00
     # KLS, [01:06:12], 000011100000000000000000
-    # SVS, [01:06:03], 1, MOVING
     # GSS, [01:04:03], 1
     RESPONSE_RE = re.compile(b'([A-Z]+), *\\[([0-9.:]+)\\], *([0-9.]+)(, *([0-9.]+))? *\r\n')
+    # this we simply don't handle (yet) -- RESPONSE_RE will reject this
+    # SVS, [01:06:03], S, MOVING
 
     # There are other responses which we do not handle! If you send an unusual
     # command and elicit a response that causes us to flag an error, please
@@ -80,7 +81,7 @@ class IlluminationClient:
         HOLD      = 5   # not returned by Caseta or Radio Ra 2 Select
         DOUBLETAP = 6   # not returned by Caseta or Radio Ra 2 Select
 
-        LEDSTATE = 9    # "Button" is a misnomer; this queries LED state
+        LEDSTATE  = 9   # "Button" is a misnomer; this queries LED state
 
     class State(IntEnum):
         """Connection state values."""
@@ -201,8 +202,9 @@ class IlluminationClient:
             if d is not None:
                 _LOGGER.warning(f'unexpected final field in {a} {b} {c} {d} with {newa} {newd}')
             return newa, b, c, newd
-        # we pass through these without change:
+        # we pass through this without change:
         #   KLS, [01:06:12], 000011100000000000000000
+        # and read_raw() will have failed on this:
         #   SVS, [01:06:03], 1, MOVING
         return a, b, c, d
 
@@ -250,15 +252,21 @@ class IlluminationClient:
             except OSError as err:
                 _LOGGER.warning(f'Error writing to the controller: {err}')
 
-    async def query(self, mode, integration, action):
-        """Query a device to get its current state. Does not handle LED queries."""
+    async def query(self, mode, integration, action, *ignored):
+        """Query a device to get its current state."""
         if hasattr(action, "value"):
             action = action.value
-        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}")
+        _LOGGER.debug(f"Sending query {mode}, integration {integration}, action {action}, ignoring {params}")
         async with self._write_lock:
             if self._state != IlluminationClient.State.Opened:
                 return
-            self.writer.write(f'rdl,{self.to_illumination_address(integration)}\r\n'.encode())
+            if action == IlluminationClient.Button.LEDSTATE:
+                self.writer.write(f'rkls,{self.to_illumination_address(integration)}\r\n'.encode())
+            elif action == IlluminationClient.Action.SET:
+                self.writer.write(f'rdl,{self.to_illumination_address(integration)}\r\n'.encode())
+            else:
+                _LOGGER.warning(f'query(): unknown action number {action} for {integration}')
+                return
             await self.writer.drain()
 
     def to_illumination_address(self, integration):
