@@ -211,7 +211,7 @@ class LipServer:
                 (action, comma, parameters) = match.group(4).partition(b',')
                 try:
                     if comma:
-                        fourth = (int(action), int(parameters))
+                        fourth = (float(action), float(parameters))
                     else:
                         fourth = float(action)
                     return match.group(1).decode("ascii"), \
@@ -255,7 +255,9 @@ class LipServer:
         async with self._write_lock:
             if self._state != LipServer.State.Opened:
                 return
-            pval = ','.join([str(p) for p in params])
+            pval = ','.join([str(int(p)) for p in params])
+            if pval:
+                pval = f',{pval}'
             self.writer.write(f"?{mode},{integration},{action}{pval}\r\n".encode())
             await self.writer.drain()
 
