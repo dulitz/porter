@@ -13,7 +13,7 @@ by editing only the Prometheus configuration. This exporter can just run forever
 container.
 
 Currently supports these HVAC, lighting, and A/V platforms:
-  SmartThings, Savant, Lutron (Homeworks QS, Homeworks Illumination,
+  Nest (HVAC), SmartThings, Savant, Lutron (Homeworks QS, Homeworks Illumination,
   Radio Ra 2, Radio Ra 2 Select, and Caseta PRO)
 
 these security systems:
@@ -44,7 +44,7 @@ from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 from subprocess import TimeoutExpired
 
-import ambientweather, combox, flo, lutron, netaxs
+import ambientweather, combox, flo, lutron, nest, netaxs
 import neurio, purpleair, rachio, savant
 import smartthings, tankutility, tesla, totalconnect
 from sshproxy import SSHProxy
@@ -147,6 +147,9 @@ class Porter:
             lutronclient = lutron.LutronClient(self.config)
             module_to_client['lutron'] = lutronclient
             awaitables.add(lutronclient.poll())
+        if self.config.get('nest'):
+            nestclient = nest.NestClient(self.config)
+            module_to_client['nest'] = nestclient
         if self.config.get('netaxs'):
             nclient = netaxs.NetaxsClient(self.config)
             module_to_client['netaxs'] = nclient
