@@ -4,10 +4,12 @@
 
 PyYAML
 prometheus_client
+pyflowater>=0.4.3
+pysolar
 python-aqi
 python-dateutil
-pyflowater>=0.4.3
 pytz
 requests
+rinnaicontrolr
 teslapy
 total-connect-client
