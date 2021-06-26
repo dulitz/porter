@@ -28,6 +28,9 @@ these temperature and air quality monitors:
 these irrigation systems:
   Rachio
 
+these hot water heaters:
+  Rinnai
+
 and these cars:
   Tesla
 
@@ -45,8 +48,13 @@ from prometheus_client.registry import REGISTRY
 from subprocess import TimeoutExpired
 
 import ambientweather, combox, flo, lutron, nest, netaxs
-import neurio, purpleair, rachio, savant
+import neurio, purpleair, rachio, rinnai, savant
 import smartthings, tankutility, tesla, totalconnect
+
+#from brains import Brains
+class Brains:
+    """this is a stub"""
+    def __init__(self, config, modulemap): pass
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server, SilentException
 
@@ -156,6 +164,9 @@ class Porter:
         if self.config.get('rachio'):
             rclient = rachio.RachioClient(self.config)
             module_to_client['rachio'] = rclient
+        if self.config.get('rinnai'):
+            rinclient = rinnai.RinnaiClient(self.config)
+            module_to_client['rinnai'] = rinclient
         if self.config.get('savant'):
             module_to_client['savant'] = savant.SavantClient(self.config, self.sshproxy.identityfiles)
         if self.config.get('smartthings'):
@@ -176,6 +187,12 @@ class Porter:
         module_to_client['pwrview'] = neurio
         purpleair.config = self.config
         module_to_client['purpleair'] = purpleair
+        if self.config.get('brains'):
+            bclient = Brains(self.config, module_to_client)
+            # We don't add this to the map because Brains shouldn't be probed.
+            # Brains uses the usual Prometheus client to expose its internals.
+            # module_to_client['brains'] = bclient
+            awaitables.add(bclient.poll())
         REGISTRY.register(ProbeCollector(self.config, self.sshproxy, module_to_client))
         if awaitables:
             def loop():
