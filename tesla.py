@@ -79,36 +79,38 @@ class TeslaClient:
                     # then we were given the vin directly, so get fresh data even
                     # if we wake the car up or keep it from going to sleep
                     v.sync_wake_up()
-                    cache = self._collect_vehicle(v.get_vehicle_data())
-                    self.vehicle_cache[vkey] = (now, cache)
+                    (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
+                    self.vehicle_cache[vkey] = (now, cache, awake)
                     gmflist += cache
                 elif summary.get('state', '').lower() == 'online':
                     # This is the complicated case: we want to gather data
-                    # opportunistically, but not so often we keep the
-                    # vehicle awake. If it is online and we have no cache, then
-                    # something else woke it up and we should grab data now.
-                    # If our cache is too old, we refresh. Otherwise we return
-                    # cached data to make sure we don't wake the vehicle.
-                    (cachetime, cache) = self.vehicle_cache.get(vkey, (0, None))
-                    if now - cachetime > self.vehicle_cache_time:
+                    # opportunistically, but not so often we keep the vehicle
+                    # awake. If it is online and we have no cache, or if it is
+                    # powered up, then something else woke it up and we should
+                    # grab data now. If our cache is too old, we refresh. Otherwise
+                    # we return cached data to make sure we don't wake the vehicle.
+                    (cachetime, cache, awake) = self.vehicle_cache.get(vkey, (0, None, True))
+                    if now - cachetime > self.vehicle_cache_time or awake:
                         LOGGER.debug(f'refreshing cache for {vkey}')
-                        cache = self._collect_vehicle(v.get_vehicle_data())
-                        self.vehicle_cache[vkey] = (now, cache)
+                        (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
+                        self.vehicle_cache[vkey] = (now, cache, awake)
                     gmflist += cache
                 else:
                     # At this point we weren't given the vin directly and the car
-                    # is not online, so only return (known good) summary data.
-                    # We invalidate the cache because when the car comes back online
+                    # is not online, so only return (known good) summary data. We
+                    # invalidate the cache because when the car comes back online
                     # we should get fresh data, as someone else woke it up.
-                    gmflist += self._collect_vehicle(summary)
-                    if self.vehicle_cache.get(vkey, (0, None))[0]:
+                    (gmf_summary, awake) = self._collect_vehicle(summary)
+                    gmflist += gmf_summary
+                    if self.vehicle_cache.get(vkey, (0, None, True))[0]:
                         LOGGER.debug(f'invalidating cache for {vkey}')
-                    self.vehicle_cache[vkey] = (0, None)
+                    self.vehicle_cache[vkey] = (0, None, True)
             for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
         return gmflist
 
     def _collect_vehicle(self, vdata):
+        vehicle_awake = False
         metric_to_gauge = {}
         def makegauge(metric, desc, morelabels=[]):
             already = metric_to_gauge.get(metric)
@@ -118,6 +120,10 @@ class TeslaClient:
             gmf = GaugeMetricFamily(metric, desc, labels=labels)
             metric_to_gauge[metric] = gmf
             return gmf
+
+        def registervalue(metricname, v):
+            if metricname == 'power' and v != 0:
+                vehicle_awake = True
 
         xlatemap = {
             'id': None,
@@ -163,9 +169,9 @@ class TeslaClient:
         commonlabels = [vdata.get('vin', ''), vdata.get('display_name', ''), '']
         gmf = makegauge('data_fetch_time', 'when this vehicle data was fresh')
         gmf.add_metric(commonlabels, time.time())
-        self._walk(vdata, makegauge, commonlabels, xlatemap)
+        self._walk(vdata, makegauge, commonlabels, xlatemap, registervalue=registervalue)
 
-        return metric_to_gauge.values()
+        return (metric_to_gauge.values(), vehicle_awake)
 
     def _collect_battery(self, bdata):        
         metric_to_gauge = {}
@@ -204,7 +210,7 @@ class TeslaClient:
 
         return metric_to_gauge.values()
             
-    def _walk(self, d, makegauge, commonlabels, xlatemap):
+    def _walk(self, d, makegauge, commonlabels, xlatemap, registervalue=lambda k, v: k):
         for (k, v) in d.items():
             k = xlatemap.get(k, k)
             if k is None:
@@ -212,18 +218,22 @@ class TeslaClient:
             if isinstance(v, dict):
                 mylabels = commonlabels[:]
                 mylabels[2] = k
-                self._walk(v, makegauge, mylabels, xlatemap)
+                self._walk(v, makegauge, mylabels, xlatemap, registervalue)
             elif isinstance(v, (int, float)): # int includes bool
                 g = makegauge(k, 'auto-generated by porter/tesla.py')
                 g.add_metric(commonlabels, v)
+                registervalue(k, v)
             elif k == 'active':
+                registervalue(k, v)
                 if mylabels[2] == 'speed_limit_mode':
                     g = makegauge('speed_limit_mode', '1 if speed limited, 0 otherwise')
                     g.add_metric(commonlabels, v)
             elif k == 'solar':
+                registervalue(k, v)
                 g = makegauge('has_solar', '1 if has solar, 0 otherwise', ['kind'])
                 g.add_metric(commonlabels + [d.get('solar_type', '')], v)
             elif k == 'grid_status':
+                registervalue(k, v)
                 g = makegauge('grid_is_active', '1 if state is Active, 0 otherwise', ['state'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 1 if v == 'active' else 0)
@@ -232,29 +242,36 @@ class TeslaClient:
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 1 if v == 'self_consumption' else 0)
             elif k == 'operation':
+                registervalue(k, v)
                 g = makegauge('operating_mode_is_selfconsumption', '', ['mode'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 1 if v == 'self_consumption' else 0)
             elif k == 'state':
+                registervalue(k, v)
                 g = makegauge('is_online', '1 if state is online, 0 otherwise', ['state'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 1 if v == 'online' else 0)
             elif k == 'charging_state':
+                registervalue(k, v)
                 g = makegauge('is_charging', '1 if state is charging, 0 otherwise', ['state'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 1 if v == 'charging' else 0)
             elif k == 'conn_charge_cable':
+                registervalue(k, v)
                 g = makegauge('charge_cable_connector_is_sae', '1 if connector is SAE, 0 otherwise', ['state'])
                 g.add_metric(commonlabels + [v], 1 if v == 'SAE' else 0)
             elif k == 'climate_keeper_mode':
+                registervalue(k, v)
                 g = makegauge('climate_keeper_is_on', '1 if mode is not off, 0 if it is off', ['state'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 0 if v == 'off' else 1)
             elif k == 'shift_state':
+                registervalue(k, v)
                 g = makegauge(k, '1 if mode is not off, 0 if it is off', ['state'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 0 if v == 'off' else 1)
             elif k == 'sun_roof_state':
+                registervalue(k, v)
                 g = makegauge('sunroof_closed', '1 if closed, 0 otherwise', ['state'])
                 v = (v or '').lower()
                 g.add_metric(commonlabels + [v], 1 if v == 'closed' else 0)
@@ -268,7 +285,7 @@ class TeslaClient:
                     
 
 # Run this as a main program to fetch the initial token into cache.json. You can then
-# copy that token into your Docker image.
+# copy that token to your Docker image.
 
 if __name__ == '__main__':
     import getpass, sys, yaml
