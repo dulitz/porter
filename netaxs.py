@@ -196,8 +196,10 @@ class Session:
         self._debug('precards', p)
         r = p.json()
         statuscode = r['status']
-        if int(statuscode) != 0 or r['failedPanels']:
-            raise NetaxsError(f'error status during get_cards: {r}')
+        if int(statuscode) == 9:
+            pass
+        elif int(statuscode) != 0 or r['failedPanels']:
+            raise NetaxsError(f'error status during get_cards phase 1: {r}')
 
         self._set_headers()
         cards = self.session.get(f'{self.uri}/models/CardReport.csv', timeout=self.timeout)
@@ -530,6 +532,10 @@ if __name__ == '__main__':
             print(e)
         for we in session.get_web_events(notbefore=ts):
             print('webevent', we)
+
+    if True:
+        session = client._get_session(target)
+        print(session.get_cards())
 
     while True:
         i = client.collect(target)
