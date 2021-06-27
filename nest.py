@@ -232,11 +232,12 @@ In your browser, visit {uri}
 ''')
     while True:
         finaluri = input('Paste the URL from the browser bar after you have agreed to the consent screens: ')
-        (junk, mid, end) = finaluri.partition('&code=')
+        (junk, mid, end) = finaluri.partition('code=')
         if end:
             (code, amp, end) = end.partition('&')
             break
         print('The URL you entered does not contain a code. Please try again.')
+
     resp = requests.post(f'https://www.googleapis.com/oauth2/v4/token?client_id={clientid}&client_secret={clientsecret}&code={code}&grant_type=authorization_code&redirect_uri=https://localhost')
     resp.raise_for_status()
     c = resp.json()
@@ -245,7 +246,7 @@ In your browser, visit {uri}
     endpoint = f'https://smartdevicemanagement.googleapis.com/v1/enterprises/{projectid}/devices'
     headers = { 'Content-Type': 'application/json',
                 'Authorization': f'Bearer {accesstoken}' }
-    resp = command(endpoint, headers=headers, timeout=20)
+    resp = requests.get(endpoint, headers=headers, timeout=20)
     resp.raise_for_status()
     print(json.dumps(resp.json(), indent=2))
     print(f'''
