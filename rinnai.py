@@ -22,7 +22,7 @@ class RinnaiClient:
         self.config = config
         self.cv = threading.Condition()
         self.emailtoclient = {}
-        self.emailtolast = {}
+        self.emailtocache = {}
 
         myconfig = config.get('rinnai')
         if not myconfig:
@@ -31,19 +31,22 @@ class RinnaiClient:
             raise Exception('no rinnai credentials')
         if not myconfig.get('timeout'):
             myconfig['timeout'] = 10
+        if not myconfig.get('cachetime'):
+            myconfig['cachetime'] = 0
 
     def get_devices(self, target):
         """Returns a list of dictionaries, one dictionary per device."""
         with self.cv:
-            c = self.emailtoclient.get(target)
-            if not c:
+            now = time.time()
+            (t, c) = self.emailtoclient.get(target, (0, []))
+            if (now - c) > self.config['rinnai']['cachetime']:
                 pwd = self.config['rinnai']['credentials'].get(target)
                 if not pwd:
                     raise RinnaiError(f'no credentials for target {target}')
                 c = rinnaicontrolr.RinnaiWaterHeater(target, pwd)
                 self.emailtoclient[target] = c
-            self.emailtolast[target] = c.getDevices()
-            return self.emailtolast[target]
+            self.emailtocache[target] = (now, c.getDevices())
+            return self.emailtocache[target][1]
 
     @REQUEST_TIME.time()
     def collect(self, target):
