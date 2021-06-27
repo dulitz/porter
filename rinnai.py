@@ -39,7 +39,7 @@ class RinnaiClient:
         with self.cv:
             now = time.time()
             (t, c) = self.emailtoclient.get(target, (0, []))
-            if (now - c) > self.config['rinnai']['cachetime']:
+            if (now - t) > self.config['rinnai']['cachetime']:
                 pwd = self.config['rinnai']['credentials'].get(target)
                 if not pwd:
                     raise RinnaiError(f'no credentials for target {target}')
