@@ -305,7 +305,7 @@ class ComboxWeb:
     
     def _dereference_and_clean(self, response, name):
         r = response.text
-        return response.json()['values'][name].replace('&#0D;&#0A;', '\n').replace('&#22;', '"').replace('&#09;', ' ') if r else ''
+        return response.json()['values'].get(name, '').replace('&#0D;&#0A;', '\n').replace('&#22;', '"').replace('&#09;', ' ') if r else ''
   
     # if you're not logged in or your login has expired, this will raise
     # json.decoder.JSONDecodeError because the server responds with HTTP status 200
