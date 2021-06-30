@@ -18,6 +18,9 @@ from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
                                          'time of netaxs requests')
+LOGIN_ATTEMPTS = prometheus_client.Gauge('netaxs_login_attempts',
+                                         'how many times we have logged in to netaxs')
+
 LOGGER = logging.getLogger('porter.netaxs')
 
 class NetaxsError(Exception):
@@ -39,6 +42,8 @@ class Session:
     def open(self):
         if self.session:
             return
+        LOGGER.info(f'opened connection to {self.uri}')
+        LOGIN_ATTEMPTS.inc()
         self.session = requests.Session()
         self.session.verify = self.verify
 
@@ -350,7 +355,6 @@ class NetaxsClient:
             timezone = targetconfig.get('timezone', '')
             s = Session(target, user, password, timeout, verify=verify, timezone=timezone)
             s.open()
-            LOGGER.info(f'opened connection to {target}')
             s.last_porter = {
                 'adminlogins': 0, 'invalidpasswords': 0, 'dbupdates': {},
                 'cardnotfound': {}, 'cardfound': {}, 'card_timestamp': 0,

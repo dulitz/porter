@@ -30,20 +30,24 @@ REQUEST_TIME = prometheus_client.Summary('combox_processing_seconds',
                                          'time of combox requests')
 CRITICAL_ENTRY = prometheus_client.Gauge('combox_critical_section_entry_time',
                                          'when the critical section was entered')
+LOGIN_ATTEMPTS = prometheus_client.Gauge('combox_login_attempts',
+                                         'how many times we have logged in to combox')
 
+class ComboxError(Exception):
+    pass
 
 class ComboxClient:
     def __init__(self, config):
         self.config = config
         myconfig = config.get('combox')
         if not myconfig:
-            raise Exception('no config for combox')
+            raise ComboxError('no config for combox')
         self.user = myconfig.get('user')
         if not self.user:
-            raise Exception('no user for combox')
+            raise ComboxError('no user for combox')
         self.password = myconfig.get('password')
         if not self.password:
-            raise Exception('no password for combox')
+            raise ComboxError('no password for combox')
         if myconfig.get('timeout') is None:
             myconfig['timeout'] = 20
         self.target_to_client = {}
@@ -76,6 +80,9 @@ class ComboxClient:
                 self.target_to_client[target] = (client, devices)
             devinfos = [client.get_deviceinfo(d) for d in devices]
             CRITICAL_ENTRY.set(0)
+
+        if not devinfos:
+            raise ComboxError('got empty devicelist')
 
         for d in devinfos:
             if not d:
@@ -262,6 +269,7 @@ class ComboxWeb:
         })
     
     def login(self, user, password):
+        LOGIN_ATTEMPTS.inc()
         self.user, self.password = user, password
         authinfo = {
             'login_username': user,
@@ -272,6 +280,7 @@ class ComboxWeb:
         p = self.session.post('%s/login.cgi' % self.uri, data=authinfo, timeout=self.timeout)
         p.raise_for_status()
         self._write('0duringlogin', p)
+        LOGGER.info(f'authenticated as {user}')
   
         # we seem not to need this
         # self._set_headers()
