@@ -280,7 +280,7 @@ class ComboxWeb:
         p = self.session.post('%s/login.cgi' % self.uri, data=authinfo, timeout=self.timeout)
         p.raise_for_status()
         self._write('0duringlogin', p)
-        LOGGER.info(f'authenticated as {user}')
+        LOGGER.info(f'authenticated to {self.uri} as {user}')
   
         # we seem not to need this
         # self._set_headers()
