@@ -47,7 +47,7 @@ class RinnaiClient:
             now = time.time()
             (t, cache) = self.emailtocache.get(target, (0, []))
             if (now - t) > self.config['rinnai']['cachetime']:
-                self.emailtocache[target] = (now, c.getDevices())
+                self.emailtocache[target] = (now, c.get_devices())
             return self.emailtocache[target][1]
 
     @REQUEST_TIME.time()
