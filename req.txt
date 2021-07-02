@@ -10,6 +10,6 @@ python-aqi
 python-dateutil
 pytz
 requests
-rinnaicontrolr
+rinnaicontrolr>=0.4
 teslapy
 total-connect-client
