@@ -330,6 +330,7 @@ class ComboxWeb:
         try:
             return json.loads(self._dereference_and_clean(r, name))
         except JSONDecodeError:
+            LOGGER.info(f'reconnecting due to JSON error loading {name}')
             self.reconnect()
             self.login(self.user, self.password)
             self._set_headers()
