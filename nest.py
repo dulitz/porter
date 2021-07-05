@@ -230,6 +230,20 @@ In your browser, visit {uri}
   - Agree to the consent screens.
   - The final page will fail to load and that is okay.
 ''')
+    (resp, refreshtoken) = get_refresh(clientid, clientsecret, projectid)
+    print(json.dumps(resp.json(), indent=2))
+    print(f'''
+Add these lines to your porter.yml file:
+
+nest:
+  projectid: {projectid}
+  clientid: {clientid}
+  clientsecret: {clientsecret}
+  credentials:
+    'YOUR_TARGETNAME_GOES_HERE': '{refreshtoken}'
+''')
+
+def get_refresh(clientid, clientsecret, projectid):
     while True:
         finaluri = input('Paste the URL from the browser bar after you have agreed to the consent screens: ')
         (junk, mid, end) = finaluri.partition('code=')
@@ -248,14 +262,20 @@ In your browser, visit {uri}
                 'Authorization': f'Bearer {accesstoken}' }
     resp = requests.get(endpoint, headers=headers, timeout=20)
     resp.raise_for_status()
-    print(json.dumps(resp.json(), indent=2))
-    print(f'''
-Add these lines to your porter.yml file:
+    return (resp, refreshtoken)
 
-nest:
-  projectid: {projectid}
-  clientid: {clientid}
-  clientsecret: {clientsecret}
+def prompt_for_refresh(config):
+    clientid = config['nest']['clientid']
+    clientsecret = config['nest']['clientsecret']
+    projectid = config['nest']['projectid']
+    uri = f'https://nestservices.google.com/partnerconnections/{projectid}/auth?redirect_uri=https://localhost&access_type=offline&prompt=consent&client_id={clientid}&response_type=code&scope=https://www.googleapis.com/auth/sdm.service'
+    print(f'''
+In your browser, visit {uri}
+  - Agree to the consent screens.
+  - The final page will fail to load and that is okay.
+''')
+    (resp, refreshtoken) = get_refresh(clientid, clientsecret, projectid)
+    print(f'''
   credentials:
     'YOUR_TARGETNAME_GOES_HERE': '{refreshtoken}'
 ''')
@@ -280,3 +300,6 @@ if __name__ == '__main__':
     except NestError as e:
         print(f'could not instantiate client: {e}')
         prompt_for_project()
+    except requests.exceptions.HTTPError as e:
+        print(f'error instantiating client: {e}')
+        prompt_for_refresh(config)
