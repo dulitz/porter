@@ -1,0 +1,34 @@
+# docker-compose.yml for Porter
+#
+# Cookbook:
+#   1. create a directory dedicated to this stack (e.g. ~/porter-compose)
+#   2. copy this file to ~/porter-compose/docker-compose.yml
+#   3. create ~/porter-compose/porter.yml
+#   4. if you have a cache.json file for Tesla, a private CA root cert, or
+#      other files needed by porter.yml, copy them to ~/porter-compose and
+#      include them in "volumes" below.
+
+# To restart the stack with a new built image from the github repository:
+#
+#    docker-compose down && docker-compose up --build -d
+#
+# (-d causes docker-compose to detach)
+#
+# When in ~/porter-compose, check status with docker-compose ps
+# When in ~/porter-compose, tail logs with docker logs `docker-compose ps -q` --tail=50
+# Check Prometheus targets with wget http://diskwest.epispace.com:9090/targets
+
+version: '3'
+services:
+
+  porter:
+    image: porter:latest
+    build: ../porter
+    ports:
+      - "5700:5728"
+    restart: always
+    hostname: porter
+    volumes:
+      - ./cache.json:/var/lib/porter/cache.json:rw
+      - ./porter.yml:/var/lib/porter/porter.yml:ro
+      - ./EpispaceRoot.crt:/var/lib/porter/EpispaceRoot.crt:ro

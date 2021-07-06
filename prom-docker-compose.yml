@@ -1,0 +1,70 @@
+# docker-compose.yml for Prometheus, snmp-exporter, and blackbox-exporter
+#
+# Cookbook:
+#   1. create a directory dedicated to this stack (e.g. ~/prom)
+#   2. copy this file to ~/prom/docker-compose.yml
+#   3. create ~/prom/prometheus.yml
+#   4. copy ~/prom/snmp.yml from the output of snmp_generator
+#   5. create ~/prom/blackbox_exporter/config.yml
+#   6. if you have a private CA root cert, or other files needed by config.yml,
+#      copy them to ~/prom/blackbox_exporter
+#   7. if you don't already have a dedicated volume for Prometheus data, create one
+#      named "prometheus" and copy any existing Prometheus data to it.
+
+# To restart the stack with new images (whatever has the "latest" tag right now):
+#
+#    docker-compose down && docker-compose pull && docker-compose up -d
+#
+# (-d causes docker-compose to detach)
+#
+# When in ~/prom, check status with docker-compose ps
+# When in ~/prom, tail logs with docker logs `docker-compose ps -q` --tail=50
+
+version: '3'
+services:
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=2y'
+      - '--web.enable-admin-api'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      ###- '--web.enable-lifecycle'
+    restart: always
+    hostname: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus:/prometheus
+
+  snmp-exporter:
+    image: prom/snmp-exporter:latest
+    network_mode: host
+    container_name: snmp-exporter
+    command:
+      - '--config.file=/etc/snmp_exporter/snmp.yml'
+    restart: always
+    hostname: snmp-exporter
+    volumes:
+      - ./snmp.yml:/etc/snmp_exporter/snmp.yml:ro
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    ports:
+      - '9115:9115'
+    container_name: blackbox-exporter
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+    restart: always
+    hostname: blackbox-exporter
+    volumes:
+      - ./blackbox_exporter:/etc/blackbox_exporter:ro
+
+volumes:
+  prometheus:
+    external: true
