@@ -353,6 +353,27 @@ class Lipservice:
             LOGGER.warning(f'unknown response while polling {self.host}:{self.port}: {a} {b} {c} {d}')
         return self.poll() # return ourselves as coroutine so we are restarted
 
+    async def run(self, deviceid, buttons, level, command, args):
+        """Run command(args) on deviceid. Level is None or a percentage of full output."""
+        LOGGER.info(f'{self.host}:{self.port} running {command}{args} on {deviceid}')
+        if level is None and (command == 'minlevel' or command == 'maxlevel'):
+            LOGGER.warning(f'unknown level for {deviceid} {command}{args}, assuming 0')
+            level = 0
+        if command == 'minlevel' and level > float(args[0]):
+            return
+        elif command == 'maxlevel' and level < float(args[0]):
+            return
+        if command == 'minlevel' or command == 'maxlevel' or command == 'setlevel':
+            # args[0] is the output level (0-100); args[1] is optional fadetime
+            SET = liplib.LipServer.Action.SET
+            if self.cfparams.get('system', 'modern').lower() == 'illumination':
+                args = (args[0], args[1] if len(args) > 1 else 0, 0)
+                await self.lipserver.write('FADEDIM', deviceid, SET, *args)
+            else:
+                await self.lipserver.write('OUTPUT', deviceid, SET, *args)
+        elif command == 'press':
+            LOGGER.error('FIXME: press command not implemented')
+
 
 class LipserviceManager:
     def __init__(self):
@@ -411,6 +432,35 @@ class LutronClient:
         await self.manager.poll()
         return self.poll()
 
+    async def run(self, target, selector, command, *args):
+        """For the first matching target, run command(args) on the device
+        that matches selector.
+        """
+        cfparams = self.manager.register_target(self.config['lutron'], target)
+        lips = self.manager.get_lipservice_for_target(target)
+        def is_selected(deviceid, name, area):
+            return str(selector) == str(deviceid) or str(name).startswith(str(selector))
+        with lips.cv:
+            t = self._get_annotated_outputlevels_locked(lips, cfparams)
+            for (deviceid, level, name, area, *buttons) in t:
+                if is_selected(deviceid, name, area):
+                    await lips.run(deviceid, buttons, level, command, args)
+                    return
+        LOGGER.warning(f'run() on {target} selected empty set {selector}')
+
+    def _get_annotated_outputlevels_locked(self, lips, cfparams):
+        """must hold lips.cv when you call this"""
+        def annotate(deviceid):
+            (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, (None, ''))
+            if name is None:
+                # this can happen in Illumination, where dimmers are also sensors
+                # (name, area, buttons)
+                return cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', []))
+            else:
+                return (name, area)
+        return [(deviceid, level, *annotate(deviceid))
+                for (deviceid, level) in lips.outputlevels.items()]
+
     @REQUEST_TIME.time()
     def collect(self, target):
         """request all the matching devices and get the status of each one"""
@@ -431,12 +481,9 @@ class LutronClient:
             created=self.clientstarttime
         )
         with lips.cv:
-            for (deviceid, level) in lips.outputlevels.items():
+            t = self._get_annotated_outputlevels_locked(lips, cfparams)
+            for (deviceid, level, name, area, *buttons) in t:
                 if level is not None:
-                    (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, (None, ''))
-                    if name is None:
-                        # this can happen in Illumination, where dimmers are also sensors
-                        (name, area, buttons) = cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', []))
                     gmf.add_metric([str(deviceid), name, area], level)
 
             for (deviceid, cmap) in lips.ledstates.items():
