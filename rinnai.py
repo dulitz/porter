@@ -50,6 +50,25 @@ class RinnaiClient:
                 self.emailtocache[target] = (now, c.get_devices())
             return self.emailtocache[target][1]
 
+    async def run(self, target, selector, command, *args):
+        """For the first matching target, run command(args) on the device
+        that matches selector."""
+        def is_selected(deviceid, name):
+            return str(selector) == str(deviceid) or str(name).startswith(str(selector))
+        for device in self.get_devices(target):
+            devid = device['id']
+            devname = device.get('device_name', '')
+            with self.cv:
+                if is_selected(devid, devname):
+                    c = self.emailtoclient.get(target)
+                    assert c, target # self.get_devices() above ensures this
+                    if command == 'start_recirculation':
+                        c.start_recirculation(device, int(args[0]))
+                    else:
+                        LOGGER.warning(f'unknown command {command} for {target} {selector}')
+                    return
+        LOGGER.warning(f'run() on {target} selected empty set {selector}')
+
     @REQUEST_TIME.time()
     def collect(self, target):
         """request all the matching devices and get the status of each one"""
