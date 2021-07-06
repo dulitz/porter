@@ -240,12 +240,19 @@ class IlluminationClient:
         async with self._write_lock:
             if self._state != IlluminationClient.State.Opened:
                 return
-            data = f'#{mode},{integration},{action}'
+            mode = mode.upper()
+            if mode == 'FADEDIM':
+                data = f'{mode}'
+                assert int(action) == 1, action
+            else: # e.g. DBP
+                data = f'{mode},{self.to_illumination_address(integration)},{action}'
             if value is not None:
                 data += f',{value}'
             for arg in args:
                 if arg is not None:
                     data += f',{arg}'
+            if mode == 'FADEDIM':
+                data += f',{self.to_illumination_address(integration)}'
             try:
                 self.writer.write((data + "\r\n").encode("ascii"))
                 await self.writer.drain()
