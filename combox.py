@@ -330,6 +330,8 @@ class ComboxWeb:
         try:
             return json.loads(self._dereference_and_clean(r, name))
         except JSONDecodeError:
+            if name.startswith('SCP2'):
+                return {}  # is usually empty so don't retry
             LOGGER.info(f'reconnecting due to JSON error loading {name}')
             self.reconnect()
             self.login(self.user, self.password)
@@ -338,7 +340,7 @@ class ComboxWeb:
             r2.raise_for_status()
             # if this fails again, we won't try to catch it
             js = self._dereference_and_clean(r2, name)
-            return json.loads(js) if js else {} # SCP2 returns an empty string
+            return json.loads(js) if js else {}
     
     def _get_vareqval(self, name):
         uri = '%s/gethandler.json?name=%s' % (self.uri, name)
