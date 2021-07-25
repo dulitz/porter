@@ -162,9 +162,10 @@ class Lipservice:
     # other keypads have a different magic number (ugh)
     SEETOUCH_MAGIC = 80
 
-    def __init__(self, host, port, cfparams):
+    def __init__(self, host, port, cfparams, eventbus):
         self.host, self.port = host, port
         self.cfparams = cfparams
+        self.eventbus = eventbus
         self.last_ping, self.last_query = time.time(), time.time()
 
         if self.cfparams.get('system', 'modern').lower() == 'illumination':
@@ -269,8 +270,11 @@ class Lipservice:
             if action == liplib.LipServer.Button.PRESS:
                 if deviceid == 1: # then a scene was triggered
                     count = self._increment_counter(self.counts_by_scene_number, component)
+                    self.eventbus.propagate((deviceid, 'scene', component))
                 else: # a standalone device
                     count = self._increment_counter(self.counts_by_deviceid_component, (deviceid, component))
+                    (name, area, buttons) = self.cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', ''))
+                    self.eventbus.propagate((deviceid, f'{area} {name}', component))
             elif action == liplib.LipServer.Button.LEDSTATE:
                 if component > self.SEETOUCH_MAGIC and component < 20 + self.SEETOUCH_MAGIC:
                     component -= self.SEETOUCH_MAGIC
@@ -376,7 +380,8 @@ class Lipservice:
 
 
 class LipserviceManager:
-    def __init__(self):
+    def __init__(self, eventbus):
+        self.eventbus = eventbus
         self.cv = threading.Condition()
         self.target_to_cfparams = {}
         self.hostport_to_lipservice = {}
@@ -403,26 +408,29 @@ class LipserviceManager:
             port = int(portstr or 23)
             lips = self.hostport_to_lipservice.get((host, port))
             if not lips:
-                lips = Lipservice(host, port, cfparam)
+                lips = Lipservice(host, port, cfparam, self.eventbus.target(target))
                 self.hostport_to_lipservice[(host, port)] = lips
                 # open_and_query_levels() will return poll() so that's what we'll do next
                 self.tasks_pending.add(asyncio.create_task(lips.open_and_query_levels()))
                 self.tasks_pending.add(asyncio.create_task(lips.query_levels_periodic()))
                 self.tasks_pending.add(asyncio.create_task(lips.ping()))
+        self.eventbus.add_awaitables_to(self.tasks_pending)
         if self.tasks_pending:
             (done, self.tasks_pending) = await asyncio.wait(
                 self.tasks_pending, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 # as each poll() or ping() completes, schedule it to run again
-                self.tasks_pending.add(asyncio.create_task(task.result()))
+                r = task.result()
+                if r:
+                    self.tasks_pending.add(asyncio.create_task(r))
         else:
             await asyncio.sleep(timeout)
 
 
 class LutronClient:
-    def __init__(self, config):
+    def __init__(self, config, eventbus):
         self.config = config
-        self.manager = LipserviceManager()
+        self.manager = LipserviceManager(eventbus)
         lutronconfig = config.get('lutron')
         if not lutronconfig:
             raise Exception('no lutron configuration')
@@ -438,6 +446,9 @@ class LutronClient:
         """
         cfparams = self.manager.register_target(self.config['lutron'], target)
         lips = self.manager.get_lipservice_for_target(target)
+        if not lips:
+            LOGGER.warning(f'lutron run() {target} ignored first time: {selector} {command}')
+            return
         def is_selected(deviceid, name, area):
             return str(selector) == str(deviceid) or str(name).startswith(str(selector))
         with lips.cv:

@@ -50,20 +50,30 @@ class MockWriter:
         assert self.state == 1, self.state
         self.state += 1
 
-def lipsetup(config, targ, client):
+def lipsetup(config, targ, client, ebus):
     params = lutron.ConfigParams(config['lutron'], targ)
-    lips = lutron.Lipservice(targ, 23, params)
+    lips = lutron.Lipservice(targ, 23, params, ebus)
     lips.lipserver._state = liplib.LipServer.State.Opened
     client.manager.target_to_cfparams[targ] = params
     client.manager.hostport_to_lipservice[(targ, 23)] = lips
     lips.lipserver.reader = MockReader()
     return lips
 
-client = lutron.LutronClient(config)
-illips = lipsetup(config, 'illumtarget', client)
+
+class EventbusStub:
+    def __init__(self):
+        pass
+    def propagate(self, *args):
+        pass
+    def add_awaitables_to(self, otherset):
+        pass
+
+eventbus = EventbusStub()
+client = lutron.LutronClient(config, eventbus)
+illips = lipsetup(config, 'illumtarget', client, eventbus)
 illips.lipserver.writer = MockWriter(b'FADEDIM,50,0,0,01:01:00:03:01\r\n')
 
-lips = lipsetup(config, 'qstarg', client)
+lips = lipsetup(config, 'qstarg', client, eventbus)
 lips.lipserver.writer = MockWriter(b'#OUTPUT,177,1,0\r\n')
 
 asyncio.run(client.run('illumtarget', 'Pendant', 'setlevel', 50))
