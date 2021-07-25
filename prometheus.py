@@ -2,7 +2,7 @@
 
 from __future__ import unicode_literals
 
-import copy, threading
+import copy, logging, threading
 
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -80,13 +80,39 @@ def make_wsgi_app(registry=REGISTRY, registry_view_factory=registry_view_factory
             status = '200 OK'
             header = ('', '')
             output = b'''<html><head><title>Porter</title></head><body>
-Someday this will be a form. Today is not that day.
+<h1>Porter</h1>
+Someday this may be a form. Today is not that day.
+<p>
+<p><a href="/logging">view and set log level</a>
+<p><a href="/metrics">metrics</a>
 </body></html>'''
+        elif path.startswith('/logging'):
+            module = params.get('module', [''])[0].lower()
+            logger = logging.getLogger(f'porter.{module}') if module else logging.root
+            if params.get('level', [''])[0].lower() == 'debug':
+                logger.setLevel(logging.DEBUG)
+            elif params.get('level', [''])[0].lower() == 'info':
+                logger.setLevel(logging.INFO)
+            def statusp(module):
+                modspec = f'&module={module}' if module else ''
+                logger = logging.getLogger(f'porter.{module}') if module else logging.root
+                def atag(level):
+                    return f'<a href="/logging?level={level.lower()}{modspec}">{level.upper()}</a>'
+                if logger.level == logging.DEBUG:
+                    level = f'<b>DEBUG</b> {atag("info")}'
+                elif logger.level == logging.INFO:
+                    level = f'{atag("debug")} <b>INFO</b>'
+                else:
+                    level = f'neither {atag("debug")} nor {atag("info")}: {logger.level}'
+                return f'<p>Current {module} logging level: {level}'.encode()
+            status = '200 OK'
+            header = ('', '')
+            output = b'<html><head><title>Porter Logging</title></head><body><h1>Porter Logging</h1>' + statusp('') + statusp('brainstem') + statusp('totalconnect') + b'<h1>Event Log</h1></body></html>'
         elif path == '/config':
             status = '200 OK'
             header = ('', '')
             output = b'''<html><head><title>Porter Config</title></head><body>
-Someday this will show the server's config.
+Someday this may show the server's config, sanitized to exclude passwords etc.
 </body></html>'''
         else: # /metrics or /probe
             status, header, output = _bake_output(registry, accept_header, path, params, registry_view_factory)
