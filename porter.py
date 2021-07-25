@@ -51,10 +51,7 @@ import ambientweather, combox, flo, lutron, nest, netaxs
 import neurio, purpleair, rachio, rinnai, savant
 import smartthings, tankutility, tesla, totalconnect
 
-#from brains import Brains
-class Brains:
-    """this is a stub"""
-    def __init__(self, config, modulemap): pass
+from brainstem import Brainstem
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server, SilentException
 
@@ -147,20 +144,22 @@ class Porter:
         self.sshproxy = SSHProxy(self.config)
         module_to_client = {}
         awaitables = set()
+        bclient = Brainstem(self.config)
         if self.config.get('combox'):
             module_to_client['combox'] = combox.ComboxClient(self.config)
         if self.config.get('flo'):
             module_to_client['flo'] = flo.FloClient(self.config)
         if self.config.get('lutron'):
-            lutronclient = lutron.LutronClient(self.config)
+            lutronclient = lutron.LutronClient(self.config, bclient.module('lutron'))
             module_to_client['lutron'] = lutronclient
             awaitables.add(lutronclient.poll())
         if self.config.get('nest'):
             nestclient = nest.NestClient(self.config)
             module_to_client['nest'] = nestclient
         if self.config.get('netaxs'):
-            nclient = netaxs.NetaxsClient(self.config)
+            nclient = netaxs.NetaxsClient(self.config, bclient.module('netaxs'))
             module_to_client['netaxs'] = nclient
+            awaitables.add(nclient.poll())
         if self.config.get('rachio'):
             rclient = rachio.RachioClient(self.config)
             module_to_client['rachio'] = rclient
@@ -187,12 +186,13 @@ class Porter:
         module_to_client['pwrview'] = neurio
         purpleair.config = self.config
         module_to_client['purpleair'] = purpleair
-        if self.config.get('brains'):
-            bclient = Brains(self.config, module_to_client)
-            # We don't add this to the map because Brains shouldn't be probed.
-            # Brains uses the usual Prometheus client to expose its internals.
-            # module_to_client['brains'] = bclient
-            awaitables.add(bclient.poll())
+        if self.config.get('brainstem'):
+            # Brainstem uses the usual Prometheus client to expose its internals, so
+            # you shouldn't really probe this from Prometheus. We just use this method
+            # to expose event information to the browser.
+            module_to_client['brainstem'] = bclient
+            bclient.register_modules(module_to_client)
+            awaitables |= bclient.get_awaitables()
         REGISTRY.register(ProbeCollector(self.config, self.sshproxy, module_to_client))
         if awaitables:
             def loop():
@@ -202,7 +202,9 @@ class Porter:
                     while True:
                         (done, awaiting) = await asyncio.wait(awaiting, timeout=None, return_when=asyncio.FIRST_COMPLETED)
                         for d in done:
-                            awaiting.add(d.result())
+                            r = d.result()
+                            if r:
+                                awaiting.add(r)
                 asyncio.run(async_loop())
 
             self.asyncthread = threading.Thread(target=loop, name="asyncio loop", daemon=True)
@@ -228,9 +230,9 @@ def main(args):
 
     config = yaml.safe_load(open(configfile, 'rt')) or {}
     if config:
-        logging.info(f'using configuration file {configfile}')
+        LOGGER.info(f'using configuration file {configfile}')
     else:
-        logging.info(f'configuration file {configfile} was empty; ignored')
+        LOGGER.info(f'configuration file {configfile} was empty; ignored')
     p = Porter(config)
     p.start_wsgi_server()
 
