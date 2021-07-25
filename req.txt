@@ -13,3 +13,4 @@ requests
 rinnaicontrolr>=0.4
 teslapy
 total-connect-client
+websockets

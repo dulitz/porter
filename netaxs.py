@@ -12,19 +12,22 @@ internals of the webapp, it should be expected to break whenever you
 update the device firmware.
 """
 
-import json, logging, requests, prometheus_client, time, threading, pytz
+import asyncio, json, logging, time, threading, ssl
+import requests, prometheus_client, pytz, websockets
+
 from datetime import datetime
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
                                          'time of netaxs requests')
 LOGIN_ATTEMPTS = prometheus_client.Gauge('netaxs_login_attempts',
-                                         'how many times we have logged in to netaxs')
-
+                                         'how many times we have logged in to netaxs',
+                                         ['uri'])
 LOGGER = logging.getLogger('porter.netaxs')
 
 class NetaxsError(Exception):
     pass
+
 
 class Session:
     def __init__(self, uri, user, password, timeout, verify=None, timezone=''):
@@ -38,12 +41,13 @@ class Session:
         while self.uri.endswith('/'):
             self.uri = self.uri[:len(self.uri)-1]
         self.cv = threading.Condition()
+        self.websocket = None
 
     def open(self):
         if self.session:
             return
         LOGGER.info(f'opened connection to {self.uri}')
-        LOGIN_ATTEMPTS.inc()
+        LOGIN_ATTEMPTS.labels(uri=self.uri).inc()
         self.session = requests.Session()
         self.session.verify = self.verify
 
@@ -77,7 +81,81 @@ class Session:
     def close(self):
         self.session.close()
         self.session = None
-    
+        if self.websocket:
+            ### TODO await self.websocket.close()
+            self.websocket = None
+
+    async def async_open(self):
+        assert self.session  # must be signed in
+        self.readlock, self.writelock = asyncio.Lock(), asyncio.Lock()
+        if not self.websocket:
+            sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            sslcontext.load_verify_locations(self.verify)
+            self.wssuri = f'{self.uri}/views/EventHandlerIntf/'.replace('https', 'wss', 1)
+            cookies = '; '.join([f'{k}={v}' for (k, v) in self.session.cookies.items()])
+            extra_headers = { 'Cookie': cookies }
+            self.websocket = await websockets.connect(
+                self.wssuri, ssl=sslcontext, origin=self.uri, max_size=4096, max_queue=1024,
+                ping_interval=None, ping_timeout=None, extra_headers=extra_headers)
+
+    async def write_message(self, message):
+        assert self.websocket  # must call async_open() first
+        LOGGER.debug(f'sending {message} on {self.wssuri}')
+        async with self.writelock:
+            return await self.websocket.send(message)
+
+    async def read_event(self):
+        assert self.websocket  # must have called async_open()
+        async with self.readlock:
+            async for message in self.websocket:
+                js = json.loads(message.replace("'", '"'))
+                if len(js) == 2:
+                    if js[0] == 'setCid':
+                        cid = int(js[1])
+                        LOGGER.debug(f'onConnect.cid={cid}')
+                        await self.write_message('luaNS4Client2ServerIntf;setIOState;dddd;1;1;0;1;;')
+                        continue
+                elif len(js) == 4:
+                    if js[0] == 'ud' and js[1] == 'luaNS4Server2ClientIntf':
+                        if js[2] == 'asyncLogoff' and len(js[3]) == 1:
+                            logoff_minutes = js[3][0]
+                            return { js[2]: logoff_minutes }
+                        elif js[2] == 'asyncSetIOState':
+                            # js[3] [1,26,1,1,0]
+                            return { js[2]: js[3] }
+                        elif js[2] == 'asyncSendNewEvent':
+                            (panel, datestr, evid, device, zero, logical, physical, typeint, code, site, lastname, secondzero, last) = js[3]
+                            ts = self._localize(datetime.strptime(datestr.replace('\\/', '/').strip(), '%m/%d/%Y %H:%M:%S')).timestamp()
+                            desc = ''
+                            if typeint == 1: # and subtypeint == 0
+                                if int(code) and site:
+                                    desc = 'Card Found'
+                            elif typeint == 2: # and subtypeint == 1:
+                                if site == 0:
+                                    desc = 'Card Not Found'
+                            elif typeint == 5:
+                                desc = 'Timezone Violation'
+                            elif typeint == 12: # and subtypeint == 0:
+                                desc = 'VIP Card Found'
+                            elif typeint == 11: # and subtypeint == 1:
+                                desc = 'Card Not Found: expired'
+                            if not desc:
+                                LOGGER.error(f'unknown event {js[3]}')
+                                desc = 'unknown event'
+                            return { js[2]: {
+                                'id': int(evid),
+                                'panel': panel,
+                                'when': ts,
+                                'reader': device,
+                                'logical': int(logical),
+                                'physical': int(physical),
+                                'description': desc,
+                                'code': code,
+                                'site': site,
+                                'name': lastname,
+                            } }
+                LOGGER.warning(f'unknown message from {self.wssuri}: {js}')
+
     def get_events(self, panel=1, start=0, notbefore=0):
         self._set_headers()
         assert panel == 1, f'other panels not supported {panel}'
@@ -90,6 +168,12 @@ class Session:
 
         out = []
         js = events.json()
+        # get assigned doors: [1,1,1,"Door1.1",1]
+        # door I/O mapping: [1,1,0,1,1,2,3,4,2,1,5]
+        # 1," 7\/19\/2021 09:32:49 ",4531,"Input 20: PANEL TAMPER",0,20,0,2,"0",0,"",        0,1
+        # pnl,evid,evtype,evsubtype, space, logical, physical, zero, device, code, lastname, timedict, secondzero, pin/site
+        # pin/site is 0 for error
+
         for (panel, evid, evtype, evsubtype, space, logical, physical, zero, device, code, lastname, timedict, secondzero, pin) in zip(*([iter(js)]*14)):
             try:
                 typeint, subtypeint = int(evtype), int(evsubtype)
@@ -137,6 +221,7 @@ class Session:
             out.append({
                 'id': int(evid),
                 'when': ts,
+                'panel': panel,
                 'reader': device,
                 'logical': int(logical),
                 'physical': int(physical),
@@ -283,9 +368,7 @@ class Session:
         an aware datetime in that same timezone. If self.timezone is None, just returns
         dtime unchanged. Raises pytz.exceptions.AmbiguousTimeError if dtime is
         ambiguous (during a Daylight Savings transition window)."""
-        if self.timezone is None:
-            return dtime
-        return self.timezone.localize(dtime)
+        return self.timezone.localize(dtime) if self.timezone else dtime
 
     def _debug(self, where, response):
         """during debugging, this method writes request/response info"""
@@ -299,14 +382,17 @@ class Session:
   
 
 class NetaxsClient:
-    def __init__(self, config):
+    def __init__(self, config, eventbus):
         self.config = config
+        self.eventbus = eventbus
         self.cv = threading.Condition()
         self.targetmap = {}
+        self.targeteventbusmap = {}
+        self.awaitables = set()
         self.starttime = time.time()
         # Prometheus counters only show an increase after the first value, so
         # we want to get a zero into the system as soon as we can
-        self.known_lnpns = ['1/1', '2/2', '3/3'] # maybe expand these?
+        self.known_lnpns = ['1/1', '2/2', '3/3']  # maybe expand these?
 
         myconfig = config.get('netaxs')
         if not myconfig:
@@ -322,6 +408,7 @@ class NetaxsClient:
         return newv
 
     def _get_session(self, target):
+        """must hold self.cv upon call"""
         if target == 'verify' or target == 'verifysearch' or target == 'timeout':
             raise NetaxsError(f'netaxs target {target} is reserved and cannot be configured')
         s = self.targetmap.get(target)
@@ -357,9 +444,10 @@ class NetaxsClient:
             s.open()
             s.last_porter = {
                 'adminlogins': 0, 'invalidpasswords': 0, 'dbupdates': {},
-                'cardnotfound': {}, 'cardfound': {}, 'card_timestamp': 0,
+                'cardnotfound': {}, 'timezone': {}, 'cardfound': {}, 'card_timestamp': 0,
                 'unknowneventtypes': 0, 'tamper': 0,
                 'eventid': 0, 'timestamp': self.starttime - 5,
+                'successful_io_timestamp': 0,
             }
             s.last_porter['dbupdates']['0/0'] = 0
             for vip in [True, False]:
@@ -367,10 +455,13 @@ class NetaxsClient:
                 for lnpn in self.known_lnpns:
                     s.last_porter['cardfound'][vip][lnpn] = 0
                     s.last_porter['cardnotfound'][lnpn] = 0
+                    s.last_porter['timezone'][lnpn] = 0
+            self.awaitables.add(self._coro_for_session(target, s, must_open=True))
             self.targetmap[target] = s
+            self.targeteventbusmap[target] = self.eventbus.target(target)
         return s
 
-    def _retry_if_needed(self, session, func, tries=5):
+    def _retry_if_needed(self, session, func, tries=1):
         while True:
             try:
                 return func()
@@ -380,7 +471,141 @@ class NetaxsClient:
                 tries -= 1
                 if tries == 0:
                     raise
-    
+
+    async def _coro_for_session(self, target, session, must_open=False):
+        """Awaits asynchronous messages for session. When one arrives it is processed.
+        If must_open is true, it calls async_open() first.
+        """
+        try:
+            if must_open:
+                await session.async_open()
+            ev = await session.read_event()
+            last = session.last_porter
+            last['successful_io_timestamp'] = max(time.time(), last['successful_io_timestamp'])
+            logoff_minutes = ev.get('asyncLogoff')
+            if logoff_minutes is not None:
+                LOGGER.debug(f'{session.uri}: asyncLogoff in {logoff_minutes} min')
+                if logoff_minutes < 2:
+                    with session.cv:
+                        LOGGER.debug(f'{session.uri}: updating cards for keepalive')
+                        self._update_cards(session, time.time())
+            newevent = ev.get('asyncSendNewEvent')
+            if newevent:
+                LOGGER.debug(f'{session.uri}: new async event {newevent}')
+                with self.cv:
+                    self._update_one_event(session, newevent)
+        except Exception ex:
+            LOGGER.error(f'{session.uri}: error reading websocket', exc_info=ex)
+            await asyncio.sleep(1) # rate limiting
+        # schedule ourselves to run again
+        return self._coro_for_session(target, session)
+
+    async def poll(self):
+        """Awaits events from each active Session. When one comes in, we update
+        in advance of our next Prometheus poll.
+        """
+        awaiting = set()
+        while True:
+            with self.cv:
+                awaiting |= self.awaitables
+                self.awaitables = set()
+                for eventbus in self.targeteventbusmap.values():
+                    eventbus.add_awaitables_to(awaiting)
+            if not awaiting:
+                await asyncio.sleep(1)
+                continue
+            (done, awaiting) = await asyncio.wait(awaiting, timeout=1,
+                                                  return_when=asyncio.FIRST_COMPLETED)
+            for d in done:
+                r = d.result()
+                if r:
+                    awaiting.add(asyncio.create_task(r))
+
+    def _update_cards(self, session, now):
+        last = session.last_porter
+        cards = self._retry_if_needed(session, lambda: session.get_cards())
+        last['cards'] = { c['card']: c for c in cards }
+        last['card_timestamp'] = now
+
+    def _update_one_event(self, session, d):
+        def getit(d, sub):
+            r = d.get(sub)
+            if r is None:
+                r = {}
+                d[sub] = r
+            return r
+        last = session.last_porter
+        cards = last.get('cards')
+        eventid = d['id']
+        last['eventid'] = max(last['eventid'], eventid)
+        low = d['description'].lower()
+        lp = f"{d.get('logical', '')}/{d.get('physical', '')}"
+        plp = f"{d.get('panel', '')}/{lp}"
+        eventbus = self.targeteventbusmap[session.uri]
+        if 'card found' in low:
+            eventbus.propagate((plp, d['description'], d['name']))
+            m = getit(last['cardfound'], 'vip' in low)
+            self._increment(m, lp)
+            codeint = int(d['code'])
+            card = last.get('cards', {}).get(codeint)
+            vip = ' VIP' if 'vip' in low else ''
+            if card:
+                LOGGER.info(f'{session.uri}{vip} {d["name"]} swiped {time.ctime(d["when"])}, previous {time.ctime(card["last_swiped"])}')
+            else:
+                LOGGER.info(f'{session.uri}{vip} new card {d["name"]} swiped {time.ctime(d["when"])}')
+                last['cards'][codeint] = {
+                    'card': int(d['code']),
+                    'lastname': d['lastname'],
+                }
+            card['last_swiped'] = d['when']
+        elif 'card not found' in low: # either not found or expired
+            eventbus.propagate((plp, d['description'], d.get('name', '')))
+            self._increment(last['cardnotfound'], lp)
+            LOGGER.info(f'{session.uri} {d.get("name", "")} {d["description"]}')
+        elif 'timezone violation' in low:
+            eventbus.propagate((plp, d['description'], d['name']))
+            self._increment(last['timezone'], lp)
+            LOGGER.info(f'{session.uri} {d["name"]} timezone violation {time.ctime(d["when"])}')
+            # TODO: should we update last_swiped?
+        elif 'database update' in low:
+            eventbus.propagate((plp, d['description'], ''))
+            self._increment(last['dbupdate'], lp)
+        elif 'tamper' in low:
+            eventbus.propagate((plp, d['description'], ''))
+            self._increment(last, 'tamper')
+        else:
+            eventbus.propagate((plp, d['description'], ''))
+            LOGGER.info(f'{session.uri} {low}: {d}')
+            self._increment(last, 'unknowneventtypes')
+        last['timestamp'] = max(d['when'], last['timestamp'])
+
+    def _update_events(self, session):
+        last = session.last_porter
+        events = self._retry_if_needed(
+            session, lambda: session.get_events(notbefore=last['timestamp']))
+        maxcompletedeventid = last['eventid']
+        for d in events:
+            if d['id'] <= maxcompletedeventid:
+                break  # they come in decreasing order, so we are done
+            self._update_one_event(session, d)
+        webevents = session.get_web_events(notbefore=last['timestamp'])
+        for d in webevents:
+            low = d['type'].lower()
+            if low == 'invalid password' or low == 'unknown user':
+                last['invalidpasswords'] += 1
+            elif low == 'login':
+                if 'Administrator' in d['description']:
+                    last['adminlogins'] += 1
+            elif low == 'logout':
+                pass
+            else:
+                LOGGER.info(f'{target}: unknown webevent type {low}: {d}')
+
+        # update timestamp with latest timestamp we got back
+        allevents = events + webevents
+        latest = max([e.get('when', 0) for e in allevents]) if allevents else 0
+        last['timestamp'] = max(latest, last['timestamp'])
+
     @REQUEST_TIME.time()
     def collect(self, target):
         metric_to_gauge = {}
@@ -398,62 +623,11 @@ class NetaxsClient:
             last = session.last_porter
             now = time.time()
             if now - last['card_timestamp'] > self.config['netaxs']['card_refetch_interval']:
-                cards = self._retry_if_needed(session, lambda: session.get_cards())
-                last['cards'] = { c['card']: c for c in cards }
-                last['card_timestamp'] = now
+                self._update_cards(session, now)
+                self._update_events(session)
 
-            def getit(d, sub):
-                r = d.get(sub)
-                if r is None:
-                    r = {}
-                    d[sub] = r
-                return r
-
-            maxcompletedeventid = last['eventid']
-            events = self._retry_if_needed(
-                session, lambda: session.get_events(notbefore=last['timestamp']))
-            for d in events:
-                eventid = d['id']
-                if eventid <= maxcompletedeventid:
-                    break # they come in decreasing order, so we are done
-                last['eventid'] = max(last['eventid'], eventid)
-                low = d['description'].lower()
-                lp = f"{d.get('logical', '')}/{d.get('physical', '')}"
-                if 'card found' in low:
-                    m = getit(last['cardfound'], 'vip' in low)
-                    self._increment(m, lp)
-                elif low == 'card not found':
-                    self._increment(last['cardnotfound'], lp)
-                elif 'database update' in low:
-                    self._increment(last['dbupdate'], lp)
-                elif 'tamper' in low:
-                    self._increment(last, 'tamper')
-                else:
-                    LOGGER.info(f'{target}: unknown event type {low}: {d}')
-                    self._increment(last, 'unknowneventtypes')
-            webevents = session.get_web_events(notbefore=last['timestamp'])
-            for d in webevents:
-                low = d['type'].lower()
-                if low == 'invalid password' or low == 'unknown user':
-                    last['invalidpasswords'] += 1
-                elif low == 'login':
-                    if 'Administrator' in d['description']:
-                        last['adminlogins'] += 1
-                elif low == 'logout':
-                    pass
-                else:
-                    LOGGER.info(f'{target}: unknown webevent type {low}: {d}')
-
-            # update timestamp with latest timestamp we got back
-            allevents = events + webevents
-            latest = max([e.get('when', 0) for e in allevents]) if allevents else 0
-            last['timestamp'] = max(latest, last['timestamp'])
-
-            #print(events)
-            #print(webevents)
-            #print(last['cards'])
-            #return ''
-
+            gmf = makegauge('successful_io_timestamp', 'when last successful I/O occurred')
+            gmf.add_metric([], last['successful_io_timestamp']*1000)
             numvalid = sum([1 for c in last['cards'].values() if c.get('uses_remaining', 1) > 0 and c.get('expiration', now+10) > now])
             gmf = makegauge('num_access_cards', 'number of access cards in the system', ['valid'])
             gmf.add_metric(['1'], numvalid)
@@ -491,8 +665,9 @@ class NetaxsClient:
                 'number of card swipes that were rejected',
                 labels=['lnpn'], created=self.starttime
             )
-            for (lnpn, count) in last['cardnotfound'].items():
-                cmf_rejected.add_metric([lnpn], count)
+            bad_lnpns = set(last['cardnotfound'].keys()).union(last['timezone'].keys())
+            for lnpn in bad_lnpns:
+                cmf_rejected.add_metric([lnpn], last['cardnotfound'].get(lnpn, 0) + last['timezone'].get(lnpn, 0))
 
             cmf_dbupdates = CounterMetricFamily(
                 'num_database_updates',
@@ -519,12 +694,20 @@ class NetaxsClient:
         return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates, cmf_unknown, cmf_tamper]
 
 
+class EventbusStub:
+    def __init__(self):
+        pass
+    def propagate(self, *args):
+        pass
+    def add_awaitables_to(self, otherset):
+        pass
+
 if __name__ == '__main__':
     import json, sys, yaml
     assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
     logging.basicConfig(level=logging.INFO)
-    client = NetaxsClient(config)
+    client = NetaxsClient(config, EventbusStub())
     target = sys.argv[2]
 
     # useful if there is some kind of unknown event and you want to see
@@ -538,8 +721,10 @@ if __name__ == '__main__':
             print('webevent', we)
 
     if True:
+        LOGGER.setLevel(logging.DEBUG)
         session = client._get_session(target)
-        print(session.get_cards())
+        while True:
+            print(asyncio.run(session.read_event()))
 
     while True:
         i = client.collect(target)
