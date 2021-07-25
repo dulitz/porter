@@ -8,7 +8,7 @@ To get a Personal Access Token, visit https://account.smartthings.com/tokens
 See https://smartthings.developer.samsung.com/docs/api-ref/st-api.html
 """
 
-import json, prometheus_client, requests, time, threading
+import json, logging, prometheus_client, requests, time, threading
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
 
@@ -25,6 +25,8 @@ POST /devices/{deviceId}/commands
 
 REQUEST_TIME = prometheus_client.Summary('smartthings_processing_seconds',
                                          'time of smartthings requests')
+LOGGER = logging.getLogger('porter.smartthings')
+
 
 class SmartThingsClient:
     API_PREFIX = 'https://api.smartthings.com/v1'
@@ -64,6 +66,34 @@ class SmartThingsClient:
                 self.cache[rpath] = (now, val)
         return val
 
+    def _get_locations(self):
+        locations = {}
+        for loc in self.cache_request('/locations').get('items', []):
+            lid = loc.get('locationId')
+            name = loc.get('name')
+            if lid and name:
+                locations[lid] = name
+        return locations
+
+    async def run(self, target, selector, command, *args):
+        """selector is deviceid[/capability[/component]]
+        command is the name of a command (e.g. "switch")
+        args are command arguments (e.g. "on" or "off")
+        """
+        capability = None
+        component = None
+        (deviceid, slash, capacomponent) = selector.partition('/')
+        if capacomponent:
+            (capability, slash, component) = capacomponent.partition('/')
+        capability = capability or command
+        data = { 'commands': [{'capability': capability, 'command': command, 'arguments': args}] }
+        if component:
+            data['commands'][0]['component'] = str(component)
+        LOGGER.warning(f'smartthings {deviceid} {capability} {command} {args}')
+        r = self.bearer_json_request(requests.post, f'/devices/{deviceid}/commands', data=data)
+
+        # see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/updateDevice
+
     @REQUEST_TIME.time()
     def collect(self, target):
         """request all the matching devices and get the status of each one"""
@@ -80,12 +110,7 @@ class SmartThingsClient:
             metric_to_gauge[metric] = gmf
             return gmf
 
-        locations = {}
-        for loc in self.cache_request('/locations').get('items', []):
-            lid = loc.get('locationId')
-            name = loc.get('name')
-            if lid and name:
-                locations[lid] = name
+        locations = self._get_locations()
 
         resp = self.bearer_json_request(requests.get, '/devices')
         for device in resp.get('items', []):
