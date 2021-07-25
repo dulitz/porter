@@ -91,7 +91,8 @@ class SSHProxy:
 
     def terminate(self):
         s = sum([1 for z in self.zombies if z.poll() is None])
-        LOGGER.warning(f'terminate() with {s} unwaited zombie children')
+        if s:
+            LOGGER.warning(f'terminate() with {s} unwaited zombie children')
         if not self.rewrites:
             return # no proxies
         with self.proxies_cv:
