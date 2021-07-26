@@ -12,5 +12,5 @@ pytz
 requests
 rinnaicontrolr>=0.4
 teslapy
-total-connect-client
+total-connect-client<2021.7
 websockets
