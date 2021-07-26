@@ -494,7 +494,7 @@ class NetaxsClient:
                 LOGGER.debug(f'{session.uri}: new async event {newevent}')
                 with self.cv:
                     self._update_one_event(session, newevent)
-        except Exception ex:
+        except Exception as ex:
             LOGGER.error(f'{session.uri}: error reading websocket', exc_info=ex)
             await asyncio.sleep(1) # rate limiting
         # schedule ourselves to run again
