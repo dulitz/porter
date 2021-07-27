@@ -2,7 +2,7 @@
 
 from __future__ import unicode_literals
 
-import copy, logging, threading
+import copy, html, io, logging, threading
 
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, quote_plus, urlparse
@@ -63,6 +63,19 @@ def _bake_output(registry, accept_header, path, params, registry_view_factory):
         return str('503 Server Error'), (str('Content-Type'), content_type), b''
 
 
+# in addition to logging to stderr, we also log to LOG_STREAM
+LOG_STREAM = io.StringIO()
+LOG_STREAM_HANDLER = logging.StreamHandler(LOG_STREAM)
+LOG_STREAM_HANDLER.setFormatter(logging.Formatter('%(asctime)s:%(name)s:%(levelname)s:%(message)s'))
+LOG_STREAM_HANDLER.setLevel(logging.DEBUG)
+logging.getLogger('porter').addHandler(LOG_STREAM_HANDLER)
+def set_console_handler():
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    logging.getLogger('porter').addHandler(handler)
+#set_console_handler()
+
+
 def make_wsgi_app(registry=REGISTRY, registry_view_factory=registry_view_factory):
     """Create a WSGI app which serves the metrics from a registry."""
 
@@ -83,7 +96,7 @@ def make_wsgi_app(registry=REGISTRY, registry_view_factory=registry_view_factory
 <h1>Porter</h1>
 Someday this may be a form. Today is not that day.
 <p>
-<p><a href="/logging">view and set log level</a>
+<p><a href="/logging">view and set log level, and see logs</a>
 <p><a href="/metrics">metrics</a>
 </body></html>'''
         elif path.startswith('/logging'):
@@ -94,7 +107,7 @@ Someday this may be a form. Today is not that day.
             elif params.get('level', [''])[0].lower() == 'info':
                 logger.setLevel(logging.INFO)
             def statusp(module):
-                modspec = f'&module={module}' if module else ''
+                modspec = f'&module={html.escape(module)}' if module else ''
                 logger = logging.getLogger(f'porter.{module}') if module else logging.root
                 def atag(level):
                     return f'<a href="/logging?level={level.lower()}{modspec}">{level.upper()}</a>'
@@ -103,11 +116,17 @@ Someday this may be a form. Today is not that day.
                 elif logger.level == logging.INFO:
                     level = f'{atag("debug")} <b>INFO</b>'
                 else:
-                    level = f'neither {atag("debug")} nor {atag("info")}: {logger.level}'
-                return f'<p>Current {module} logging level: {level}'.encode()
+                    level = f'neither {atag("debug")} nor {atag("info")}: {logger.level if logger.level else "[default]"}'
+                return f'<p>Current {html.escape(module)} logging level: {level}'.encode()
             status = '200 OK'
             header = ('', '')
-            output = b'<html><head><title>Porter Logging</title></head><body><h1>Porter Logging</h1>' + statusp('') + statusp('brainstem') + statusp('totalconnect') + b'<h1>Event Log</h1></body></html>'
+            global LOG_STREAM
+            logs = LOG_STREAM.getvalue()
+            output = b'<html><head><title>Porter Logging</title></head><body><h1>Porter Logging</h1>' + b'\n'.join([statusp(m) for m in ['', 'brainstem', 'netaxs', 'totalconnect']]) + b'\n<h1>Event Log</h1><pre>' + html.escape(logs).encode() + b'</pre></body></html>'
+            if len(logs) > 1024*256:
+                LOG_STREAM = StringIO()
+                global LOG_STREAM_HANDLER
+                LOG_STREAM_HANDLER.setStream(LOG_STREAM)
         elif path == '/config':
             status = '200 OK'
             header = ('', '')
@@ -122,12 +141,14 @@ Someday this may show the server's config, sanitized to exclude passwords etc.
 
     return prometheus_app
 
+
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
     """Thread per request HTTP server."""
     # Make worker threads "fire and forget". Beginning with Python 3.7 this
     # prevents a memory leak because ``ThreadingMixIn`` starts to gather all
     # non-daemon threads in a list in order to join on them at server close.
     daemon_threads = True
+
 
 class _SilentHandler(WSGIRequestHandler):
     """WSGI handler that does not log requests."""
