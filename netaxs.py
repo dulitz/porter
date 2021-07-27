@@ -458,7 +458,7 @@ class NetaxsClient:
                     s.last_porter['timezone'][lnpn] = 0
             self.awaitables.add(self._coro_for_session(target, s, must_open=True))
             self.targetmap[target] = s
-            self.targeteventbusmap[target] = self.eventbus.target(target)
+            self.targeteventbusmap[s.uri] = self.eventbus.target(target)
         return s
 
     def _retry_if_needed(self, session, func, tries=1):
