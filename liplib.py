@@ -190,11 +190,11 @@ class LipServer:
             try:
                 read_data = await self.reader.read(LipServer.READ_SIZE)
                 if not len(read_data):
-                    _LOGGER.warning("bridge disconnected")
+                    _LOGGER.warning(f"bridge disconnected: {self._host}")
                     return False
                 self._read_buffer += read_data
             except OSError as err:
-                _LOGGER.warning(f"error reading from the bridge: {err}")
+                _LOGGER.warning(f"error reading from {self._host}: {err}")
                 return False
 
     async def read(self):
@@ -218,7 +218,7 @@ class LipServer:
                            int(match.group(2)), int(match.group(3)), \
                            fourth
                 except ValueError:
-                    _LOGGER.warning(f"could not parse {match.group(0)}")
+                    _LOGGER.warning(f"{self._host} could not parse {match.group(0)}")
         if match is False:
             # attempt to reconnect
             _LOGGER.info(f"Reconnecting to the bridge {self._host}")
@@ -244,7 +244,7 @@ class LipServer:
                 self.writer.write((data + "\r\n").encode("ascii"))
                 await self.writer.drain()
             except OSError as err:
-                _LOGGER.warning(f"Error writing to the bridge: {err}")
+                _LOGGER.warning(f"Error writing to bridge {self._host}: {err}")
 
 
     async def query(self, mode, integration, action, *params):
