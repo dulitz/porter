@@ -4,7 +4,7 @@ test_brainstem.py
 """
 
 import asyncio, logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 # uncomment this to get more asyncio logs
 # logging.basicConfig(level=logging.DEBUG)
@@ -15,26 +15,27 @@ class MockDatetime:
     def __init__(self):
         self.state = 0
 
-    def now(self):
+    def now(self, tz):
+        assert tz == timezone.utc
         self.state += 1
         if self.state == 1: # Timers.__init__()
-            return datetime(2021, 7, 13, 15, 0, 0)
+            return datetime(2021, 7, 13, 15, 0, 0, tzinfo=timezone.utc)
         elif self.state == 2: # Brainstem.run()
-            return datetime(2021, 7, 13, 15, 0, 0)
+            return datetime(2021, 7, 13, 15, 0, 0, tzinfo=timezone.utc)
         elif self.state == 3: # Timers.process_timers()
-            return datetime(2021, 7, 13, 15, 0, 0)
+            return datetime(2021, 7, 13, 15, 0, 0, tzinfo=timezone.utc)
         elif self.state == 4: # Timers.process_timers()
-            return datetime(2021, 7, 14, 3, 59, 59)
+            return datetime(2021, 7, 14, 3, 59, 59, tzinfo=timezone.utc)
         elif self.state == 5: # Timers.process_timers()
-            return datetime(2021, 7, 14, 4, 0, 0)
+            return datetime(2021, 7, 14, 4, 0, 0, tzinfo=timezone.utc)
         elif self.state == 6: # Timers.process_timers()
-            return datetime(2021, 7, 14, 4, 0, 0)
+            return datetime(2021, 7, 14, 4, 0, 0, tzinfo=timezone.utc)
         elif self.state == 7: # Timers.process_timers()
-            return datetime(2021, 7, 14, 4, 0, 0)
+            return datetime(2021, 7, 14, 4, 0, 0, tzinfo=timezone.utc)
         elif self.state == 8: # Timers.process_timers()
-            return datetime(2021, 7, 14, 4, 0, 1)
+            return datetime(2021, 7, 14, 4, 0, 1, tzinfo=timezone.utc)
         elif self.state == 9: # Timers.process_timers()
-            return datetime(2021, 7, 14, 4, 0, 1)
+            return datetime(2021, 7, 14, 4, 0, 1, tzinfo=timezone.utc)
         else:
             assert False, self.state
 
@@ -42,8 +43,11 @@ class MockDatetime:
         return date(2021, 7, 14)
     def strptime(self, *args):
         return datetime.strptime(*args)
-    def combine(self, *args):
-        return datetime.combine(*args)
+    def combine(self, *args, tzinfo=None):
+        if tzinfo is None:
+            return datetime.combine(*args)
+        else:
+            return datetime.combine(*args, tzinfo=tzinfo)
 
 mockdatetime = MockDatetime()
 brainstem.datetime = mockdatetime
@@ -55,7 +59,7 @@ class MockAsyncio:
 
     async def sleep(self, secs, next_coro=None):
         if self.state == 0:
-            assert secs == 46800, secs
+            assert secs == 32400, secs
         elif self.state == 1:
             assert secs == 1, secs
         else:

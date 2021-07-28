@@ -11,12 +11,15 @@ Reactions happen here.
 """
 
 import asyncio, heapq, logging, prometheus_client, requests
-from datetime import date, time, datetime, timedelta
+from datetime import time, datetime, timedelta, timezone
+
 
 LOGGER = logging.getLogger('porter.brainstem')
 
+
 class BrainstemError(Exception):
     pass
+
 
 class Timers:
     def __init__(self, timers, runner):
@@ -24,13 +27,13 @@ class Timers:
         zero = datetime.strptime('000000', '%H%M%S')
         def cnv(hhmmss):
             try:
-                return datetime.strptime('%06d' % hhmmss, '%H%M%S').time()
+                return datetime.strptime('%06d' % hhmmss, '%H%M%S').time().replace(tzinfo=timezone.utc)
             except ValueError:
                 LOGGER.error(f'could not parse brainstem timer {hhmmss} in {timers}')
                 raise
         self.timers = [(cnv(hhmmss), action) for (hhmmss, action) in timers]
-        self.today = date.today()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
+        self.today = now.date()
         self.heap_of_timers = [(datetime.combine(self.today, t), action)
                                for (t, action) in self.timers
                                if datetime.combine(self.today, t) >= now]
@@ -41,7 +44,7 @@ class Timers:
 
     async def process_timers(self):
         """Waits for the next timer and runs it. Returns a coroutine to run next."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if self.today < now.date():
             self.today = now.date()
             while self.heap_of_timers:
@@ -60,9 +63,10 @@ class Timers:
             else:
                 return asyncio.sleep(future, self.process_timers())
         else:
-            midnight = datetime.combine(self.today + timedelta(days=1), time())
+            midnight = datetime.combine(self.today + timedelta(days=1), time(), tzinfo=timezone.utc)
             return asyncio.sleep((midnight - now).total_seconds(), self.process_timers())
         return self.process_timers()
+
 
 class EventPropagator:
     def __init__(self, bclient, modulename, target=None):
@@ -130,7 +134,7 @@ class Brainstem:
         in order. After the last step has been executed and our task is complete,
         we return next_coro so it is scheduled to replace our task.
         """
-        self.eventbuffer.add((datetime.now(), 'run', action))
+        self.eventbuffer.add((datetime.now(timezone.utc), 'run', action))
         seq = self.config['brainstem'].get('actions', {}).get(action, [])
         assert seq, action # FIXME: verify this at load time
         for a in seq:
@@ -148,9 +152,9 @@ class Brainstem:
         Otherwise we return a coroutine that, when scheduled, triggers the reaction.
         """
         LOGGER.debug(f'observe_event {module} {target} {selector}')
-        self.eventbuffer.add((datetime.now(), 'observed', module, target, selector))
-        for (sel, cmd) in self.reactions.get(module, {}).get(target, {}).items():
-            if (sel[0] == selector[0] or selector[1] in sel[1]) and sel[2:] == tuple(selector[2:]):
+        self.eventbuffer.add((datetime.now(timezone.utc), 'observed', module, target, selector))
+        for (sel, cmd) in self.reactions.get(module, {}).get(target, []):
+            if (sel[0] == selector[0] or selector[1] in sel[1]) and sel[2:] == list(selector[2:]):
                 return self.run(cmd)
         return None
 
