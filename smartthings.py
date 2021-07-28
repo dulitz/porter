@@ -86,12 +86,12 @@ class SmartThingsClient:
         if capacomponent:
             (capability, slash, component) = capacomponent.partition('/')
         capability = capability or command
-        data = { 'commands': [{'capability': capability, 'command': command, 'arguments': args}] }
+        data = { 'commands': [{'capability': capability, 'command': command, 'arguments': list(args)}] }
         if component:
             data['commands'][0]['component'] = str(component)
-        LOGGER.warning(f'smartthings {deviceid} {capability} {command} {args}')
+        LOGGER.info(f'executing {deviceid} {data}')
         r = self.bearer_json_request(requests.post, f'/devices/{deviceid}/commands', data=data)
-
+        r.raise_for_status()
         # see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/updateDevice
 
     @REQUEST_TIME.time()
