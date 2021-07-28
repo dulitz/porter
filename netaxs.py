@@ -543,7 +543,7 @@ class NetaxsClient:
         plp = f"{d.get('panel', '')}/{lp}"
         eventbus = self.targeteventbusmap[session.uri]
         if 'card found' in low:
-            eventbus.propagate((plp, d['description'], d['name']))
+            eventbus.propagate((d['name'], d['description'], plp))
             m = getit(last['cardfound'], 'vip' in low)
             self._increment(m, lp)
             codeint = int(d['code'])
@@ -559,22 +559,22 @@ class NetaxsClient:
                 }
             card['last_swiped'] = d['when']
         elif 'card not found' in low: # either not found or expired
-            eventbus.propagate((plp, d['description'], d.get('name', '')))
+            eventbus.propagate((d.get('name', ''), d['description'], plp))
             self._increment(last['cardnotfound'], lp)
             LOGGER.info(f'{session.uri} {d.get("name", "")} {d["description"]}')
         elif 'timezone violation' in low:
-            eventbus.propagate((plp, d['description'], d['name']))
+            eventbus.propagate((d['name'], d['description'], plp))
             self._increment(last['timezone'], lp)
             LOGGER.info(f'{session.uri} {d["name"]} timezone violation {time.ctime(d["when"])}')
             # TODO: should we update last_swiped?
         elif 'database update' in low:
-            eventbus.propagate((plp, d['description'], ''))
+            eventbus.propagate(('', d['description'], plp))
             self._increment(last['dbupdate'], lp)
         elif 'tamper' in low:
-            eventbus.propagate((plp, d['description'], ''))
+            eventbus.propagate(('', d['description'], plp))
             self._increment(last, 'tamper')
         else:
-            eventbus.propagate((plp, d['description'], ''))
+            eventbus.propagate(('', d['description'], plp))
             LOGGER.info(f'{session.uri} {low}: {d}')
             self._increment(last, 'unknowneventtypes')
         last['timestamp'] = max(d['when'], last['timestamp'])
