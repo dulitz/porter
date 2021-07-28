@@ -376,7 +376,19 @@ class Lipservice:
             else:
                 await self.lipserver.write('OUTPUT', deviceid, SET, *args)
         elif command == 'press':
-            LOGGER.error('FIXME: press command not implemented')
+            if self.cfparams.get('system', 'modern').lower() == 'illumination':
+                mode = 'DBP' if len(buttons) == 1 else 'KBP'
+                if args[0] not in buttons:
+                    LOGGER.warning(f'{command}: {args[0]} not in {buttons}')
+                LOGGER.debug(f'{command} {args[0]} executes as {mode} {deviceid} {args[0]}')
+                await self.lipserver.write(mode, deviceid, args[0])
+            else:
+                if args[0] not in buttons:
+                    LOGGER.warning(f'{command} {args[0]} not in {buttons}')
+                component = args[0] + self.SEETOUCH_MAGIC
+                PRESS = liplib.LipServer.Action.PRESS
+                LOGGER.debug(f'{command} {args[0]} executes as DEVICE {deviceid} {component} {PRESS}')
+                await self.lipserver.write('DEVICE', deviceid, component, PRESS)
 
 
 class LipserviceManager:
