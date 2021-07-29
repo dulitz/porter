@@ -81,9 +81,12 @@ class EventPropagator:
         assert self.targ is None
         return EventPropagator(self.bclient, self.modulename, targ)
     def propagate(self, selector):
-        coro = self.bclient.observe_event(self.modulename, self.targ, selector)
-        if coro:
-            self.awaitables.add(coro)
+        try:
+            coro = self.bclient.observe_event(self.modulename, self.targ, selector)
+            if coro:
+                self.awaitables.add(coro)
+        except Exception as ex:
+            LOGGER.error(f'exception in propagate() {self.modulename} {self.targ} {selector}', exc_info=ex)
     def add_awaitables_to(self, otherset):
         otherset |= self.awaitables
         self.awaitables = set()
@@ -156,7 +159,7 @@ class Brainstem:
         """
         LOGGER.debug(f'observe_event {module} {target} {selector}')
         self.eventbuffer.add((datetime.now(timezone.utc), 'observed', module, target, selector))
-        for (sel, cmd) in self.reactions.get(module, {}).get(target, []):
+        for (sel, cmd) in self.reactions.get(module, {}).get(target, {}).items():
             if (sel[0] == selector[0] or selector[1] in sel[1]) and sel[2:] == list(selector[2:]):
                 return self.run(cmd)
         return None
