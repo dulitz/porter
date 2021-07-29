@@ -59,7 +59,10 @@ class Timers:
             if future <= 0:
                 (t, action) = heapq.heappop(self.heap_of_timers)
                 LOGGER.info(f'timer running {action} scheduled {-future}s ago')
-                await self.run(action)
+                try:
+                    await self.run(action)
+                except Exception as ex:
+                    LOGGER.error(f'timer running {action}', exc_info=ex)
             else:
                 return asyncio.sleep(future, self.process_timers())
         else:
