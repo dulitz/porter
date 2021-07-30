@@ -426,11 +426,15 @@ class LipserviceManager:
                 self.tasks_pending.add(asyncio.create_task(lips.open_and_query_levels()))
                 self.tasks_pending.add(asyncio.create_task(lips.query_levels_periodic()))
                 self.tasks_pending.add(asyncio.create_task(lips.ping()))
-        before = len(self.tasks_pending)
-        self.eventbus.add_awaitables_to(self.tasks_pending)
-        additional = len(self.tasks_pending) - before
-        if additional:
-            LOGGER.info(f'eventbus added {additional} tasks to pending set, now {self.tasks_pending}')
+        new_awaitables = set()
+        self.eventbus.add_awaitables_to(new_awaitables)
+        for awaitable in new_awaitables:
+            if isinstance(awaitable, asyncio.Task):
+                self.tasks_pending.add(awaitable)
+            else:
+                LOGGER.debug(f'creating task for {awaitable} from eventbus')
+                self.tasks_pending.add(asyncio.create_task(awaitable))
+
         if self.tasks_pending:
             (done, self.tasks_pending) = await asyncio.wait(
                 self.tasks_pending, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
