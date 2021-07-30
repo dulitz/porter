@@ -77,10 +77,14 @@ class EventPropagator:
         self.modulename = modulename
         self.targ = target
         self.awaitables = set()
+        self.children = []
     def target(self, targ):
         assert self.targ is None
-        return EventPropagator(self.bclient, self.modulename, targ)
+        ep = EventPropagator(self.bclient, self.modulename, targ)
+        self.children.append(ep)
+        return ep
     def propagate(self, selector):
+        assert self.targ
         try:
             coro = self.bclient.observe_event(self.modulename, self.targ, selector)
             if coro:
@@ -88,8 +92,12 @@ class EventPropagator:
         except Exception as ex:
             LOGGER.error(f'exception in propagate() {self.modulename} {self.targ} {selector}', exc_info=ex)
     def add_awaitables_to(self, otherset):
-        otherset |= self.awaitables
-        self.awaitables = set()
+        if self.children:
+            for child in self.children:
+                child.add_awaitables_to(otherset)
+        else:
+            otherset |= self.awaitables
+            self.awaitables = set()
 
 
 class CircularBuffer:
@@ -170,7 +178,6 @@ class Brainstem:
         LOGGER.debug(f'observe_event {module} {target} {selector}')
         self.eventbuffer.add((datetime.now(timezone.utc), 'observed', module, target, selector))
         for (sel, cmd) in self.reactions.get(module, {}).get(target, {}).items():
-            LOGGER.debug(f'matching against {sel} for {cmd}')
             if (sel[0] == selector[0] or sel[1] in selector[1]) and sel[2:] == selector[2:]:
                 LOGGER.debug(f'scheduling {cmd} to execute')
                 return self.run(cmd)
