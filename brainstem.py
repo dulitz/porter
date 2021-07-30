@@ -148,6 +148,7 @@ class Brainstem:
         we return next_coro so it is scheduled to replace our task.
         """
         self.eventbuffer.add((datetime.now(timezone.utc), 'run', action))
+        LOGGER.info(f'running {action}')
         seq = self.config['brainstem'].get('actions', {}).get(action, [])
         assert seq, action # FIXME: verify this at load time
         for a in seq:
@@ -162,9 +163,12 @@ class Brainstem:
                         LOGGER.debug(f'action {action} inhibited by ratelimit')
                         return next_coro
                     self.ratelimits[action] = now
+                else:
+                    LOGGER.warning(f'unknown function {funcname} {args}')
             else:
                 (module, target, selector, command, *args) = a
                 client = self.module_to_client[module] # FIXME: verify this at load time
+                LOGGER.debug(f'delegating to {client}')
                 await client.run(target, selector, command, *args)
         return next_coro
 
