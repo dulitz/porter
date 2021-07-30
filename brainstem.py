@@ -158,8 +158,8 @@ class Brainstem:
                 (funcname, *args) = a
                 if funcname == 'ratelimit' and len(args) == 1:
                     last = self.ratelimits.get(action, 0)
-                    now = datetime.now(timezone.utc)
-                    if (now - last).total_seconds() < float(args[0]):
+                    now = datetime.now(timezone.utc).timestamp()
+                    if now - last < float(args[0]):
                         LOGGER.debug(f'action {action} inhibited by ratelimit')
                         return next_coro
                     self.ratelimits[action] = now
