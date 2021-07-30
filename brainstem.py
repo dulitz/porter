@@ -148,8 +148,8 @@ class Brainstem:
         we return next_coro so it is scheduled to replace our task.
         """
         self.eventbuffer.add((datetime.now(timezone.utc), 'run', action))
-        LOGGER.info(f'running {action}')
         seq = self.config['brainstem'].get('actions', {}).get(action, [])
+        LOGGER.info(f'running {action} {seq}')
         assert seq, action # FIXME: verify this at load time
         for a in seq:
             if isinstance(a, str):
@@ -181,7 +181,6 @@ class Brainstem:
         self.eventbuffer.add((datetime.now(timezone.utc), 'observed', module, target, selector))
         for (sel, cmd) in self.reactions.get(module, {}).get(target, {}).items():
             if (sel[0] == selector[0] or sel[1] in selector[1]) and sel[2:] == selector[2:]:
-                LOGGER.debug(f'scheduling {cmd} to execute')
                 return self.run(cmd)
         return None
 
