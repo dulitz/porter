@@ -170,7 +170,9 @@ class Brainstem:
         LOGGER.debug(f'observe_event {module} {target} {selector}')
         self.eventbuffer.add((datetime.now(timezone.utc), 'observed', module, target, selector))
         for (sel, cmd) in self.reactions.get(module, {}).get(target, {}).items():
+            LOGGER.debug(f'matching against {sel} for {cmd}')
             if (sel[0] == selector[0] or sel[1] in selector[1]) and sel[2:] == selector[2:]:
+                LOGGER.debug(f'scheduling {cmd} to execute')
                 return self.run(cmd)
         return None
 
