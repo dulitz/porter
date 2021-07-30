@@ -149,7 +149,7 @@ class Brainstem:
         """
         self.eventbuffer.add((datetime.now(timezone.utc), 'run', action))
         seq = self.config['brainstem'].get('actions', {}).get(action, [])
-        LOGGER.info(f'running {action}')
+        LOGGER.debug(f'running {action}')
         assert seq, action # FIXME: verify this at load time
         for a in seq:
             if isinstance(a, str):
@@ -168,7 +168,6 @@ class Brainstem:
             else:
                 (module, target, selector, command, *args) = a
                 client = self.module_to_client[module] # FIXME: verify this at load time
-                LOGGER.debug(f'delegating to {client}')
                 await client.run(target, selector, command, *args)
         return next_coro
 
