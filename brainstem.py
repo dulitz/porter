@@ -149,7 +149,7 @@ class Brainstem:
         """
         self.eventbuffer.add((datetime.now(timezone.utc), 'run', action))
         seq = self.config['brainstem'].get('actions', {}).get(action, [])
-        LOGGER.info(f'running {action} {seq}')
+        LOGGER.info(f'running {action}')
         assert seq, action # FIXME: verify this at load time
         for a in seq:
             if isinstance(a, str):
@@ -158,8 +158,8 @@ class Brainstem:
                 (funcname, *args) = a
                 if funcname == 'ratelimit' and len(args) == 1:
                     last = self.ratelimits.get(action, 0)
-                    now = time.time()
-                    if now - last < float(args[0]):
+                    now = datetime.now(timezone.utc)
+                    if (now - last).total_seconds() < float(args[0]):
                         LOGGER.debug(f'action {action} inhibited by ratelimit')
                         return next_coro
                     self.ratelimits[action] = now
