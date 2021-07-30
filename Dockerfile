@@ -10,6 +10,10 @@ RUN apt-get install -y git openssh-client
 
 RUN mkdir /var/lib/porter
 
+ADD https://raw.githubusercontent.com/dulitz/porter/main/req.txt /var/lib/porter/req.txt
+
+RUN pip3 install -r /var/lib/porter/req.txt
+
 # the next line causes the Docker cache to be invalidated when git changes
 ADD https://api.github.com/repos/dulitz/porter/git/refs/heads/main version.json
 
@@ -33,6 +37,5 @@ RUN chmod 700 /root/.ssh
 COPY cache.json /var/lib/porter/cache.json
 RUN ln -s /var/lib/porter/cache.json /home/porter/cache.json
 RUN cp porter.yml /var/lib/porter/
-RUN pip3 install -r req.txt
 
 CMD [ "python3", "porter.py", "/var/lib/porter/porter.yml" ]
