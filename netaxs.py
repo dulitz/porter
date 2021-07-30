@@ -507,10 +507,14 @@ class NetaxsClient:
         awaiting = set()
         while True:
             with self.cv:
-                awaiting |= self.awaitables
-                self.awaitables = set()
                 for eventbus in self.targeteventbusmap.values():
-                    eventbus.add_awaitables_to(awaiting)
+                    eventbus.add_awaitables_to(self.awaitables)
+                for awaitable in self.awaitables:
+                    if isinstance(awaitable, asyncio.Task):
+                        awaiting.add(awaitable)
+                    else:
+                        awaiting.add(asyncio.create_task(awaitable))
+                self.awaitables = set()
             if not awaiting:
                 await asyncio.sleep(1)
                 continue
