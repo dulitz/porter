@@ -469,6 +469,11 @@ class LutronClient:
                 if is_selected(deviceid, name, area):
                     await lips.run(deviceid, buttons, level, command, args)
                     return
+            for (deviceid, sensortuple) in cfparams.deviceid_to_sensortuple.items():
+                (name, area, buttons) = sensortuple
+                if is_selected(deviceid, name, area):
+                    await lips.run(deviceid, buttons, None, command, args)
+                    return
         LOGGER.warning(f'run() on {target} selected empty set {selector}')
 
     def _get_annotated_outputlevels_locked(self, lips, cfparams):
