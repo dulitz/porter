@@ -23,7 +23,8 @@ services:
 
   porter:
     image: porter:latest
-    build: ../porter
+    # next line commented out because we isolate build from push to maximize uptime
+    # build: ../porter
     ports:
       - "5700:5728"
     restart: always
