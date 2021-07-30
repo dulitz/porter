@@ -112,6 +112,7 @@ class Brainstem:
         myconfig = self.config['brainstem']
         self.timers = Timers(myconfig.get('timers', []), self.run)
         self.reactions = {}
+        self.ratelimits = {}
         self.eventbuffer = CircularBuffer(10)
         for (mod, target, selector, cmd) in myconfig.get('reactions', []):
             m = self.reactions.get(mod)
@@ -146,6 +147,15 @@ class Brainstem:
         for a in seq:
             if isinstance(a, str):
                 await self.run(a)
+            elif len(a) < 4:
+                (funcname, *args) = a
+                if funcname == 'ratelimit' and len(args) == 1:
+                    last = self.ratelimits.get(action, 0)
+                    now = time.time()
+                    if now - last < float(args[0]):
+                        LOGGER.debug(f'action {action} inhibited by ratelimit')
+                        return next_coro
+                    self.ratelimits[action] = now
             else:
                 (module, target, selector, command, *args) = a
                 client = self.module_to_client[module] # FIXME: verify this at load time
@@ -160,7 +170,7 @@ class Brainstem:
         LOGGER.debug(f'observe_event {module} {target} {selector}')
         self.eventbuffer.add((datetime.now(timezone.utc), 'observed', module, target, selector))
         for (sel, cmd) in self.reactions.get(module, {}).get(target, {}).items():
-            if (sel[0] == selector[0] or selector[1] in sel[1]) and sel[2:] == list(selector[2:]):
+            if (sel[0] == selector[0] or sel[1] in selector[1]) and sel[2:] == selector[2:]:
                 return self.run(cmd)
         return None
 
@@ -176,7 +186,6 @@ class Brainstem:
             gmf.add_metric([], 1 if direction == 'run' else 0)
             gmfs.append(gmf)
         return gmfs
-                
 
     async def poll(self):
         await asyncio.sleep(60)
