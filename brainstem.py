@@ -92,12 +92,10 @@ class EventPropagator:
         except Exception as ex:
             LOGGER.error(f'exception in propagate() {self.modulename} {self.targ} {selector}', exc_info=ex)
     def add_awaitables_to(self, otherset):
-        if self.children:
-            for child in self.children:
-                child.add_awaitables_to(otherset)
-        else:
-            otherset |= self.awaitables
-            self.awaitables = set()
+        for child in self.children:
+            child.add_awaitables_to(otherset)
+        otherset |= self.awaitables
+        self.awaitables = set()
 
 
 class CircularBuffer:
