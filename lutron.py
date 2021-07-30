@@ -432,7 +432,6 @@ class LipserviceManager:
             if isinstance(awaitable, asyncio.Task):
                 self.tasks_pending.add(awaitable)
             else:
-                LOGGER.debug(f'creating task for {awaitable} from eventbus')
                 self.tasks_pending.add(asyncio.create_task(awaitable))
 
         if self.tasks_pending:
