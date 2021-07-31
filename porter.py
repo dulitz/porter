@@ -177,7 +177,7 @@ class Porter:
             tclient = tesla.TeslaClient(self.config)
             module_to_client['tesla'] = tclient
         if self.config.get('totalconnect'):
-            tcclient = totalconnect.TotalConnectClient(self.config)
+            tcclient = totalconnect.TCClient(self.config)
             module_to_client['totalconnect'] = tcclient
         ambientweather.config = self.config
         module_to_client['ambientweather'] = ambientweather

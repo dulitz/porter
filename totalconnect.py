@@ -11,8 +11,7 @@ import logging, prometheus_client, threading, time
 from datetime import datetime, timedelta
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
-from total_connect_client import TotalConnectClient as TCC
-#import totalconnectupstream as TCC
+from total_connect_client import TotalConnectClient
 
 LOGGER = logging.getLogger('porter.totalconnect')
 
@@ -21,7 +20,7 @@ REQUEST_TIME = prometheus_client.Summary('totalconnect_processing_seconds',
 CRITICAL_ENTRY = prometheus_client.Gauge('totalconnect_critical_section_entry_time',
                                          'when the critical section was entered')
 
-class TotalConnectClient:
+class TCClient:
     RECREATE_AFTER_FAILURES = 5
 
     def __init__(self, config):
@@ -87,7 +86,7 @@ class TotalConnectClient:
                     raise Exception(f'no totalconnect credentials for target {target}')
                 fresh_data = True
                 LOGGER.info(f'authenticating user {target}')
-                client = TCC.TotalConnectClient(target, password)
+                client = TotalConnectClient(target, password)
                 self.targetmap[target] = client
                 LOGGER.info(f'{target} connected')
             CRITICAL_ENTRY.set(0)
@@ -97,14 +96,10 @@ class TotalConnectClient:
             CRITICAL_ENTRY.set_to_current_time()
             for loc in client.locations.values():
                 if not fresh_data:
-                    if not client._populated:
-                        try:
-                            client.populate_details() # this may have failed earlier
-                        except Exception as e:
-                            LOGGER.info('caught exception in populate_details()')
-                            # no further processing here as we will keep trying
                     try:
-                        client.get_panel_meta_data(loc.location_id)
+                        loc.get_partition_details()
+                        loc.get_zone_details()
+                        loc.get_panel_meta_data()
                         self.consecutive_metadata_failures = 0
                     except Exception as e:
                         self.consecutive_metadata_failures += 1
@@ -162,7 +157,7 @@ if __name__ == '__main__':
     import json, sys, yaml
     assert len(sys.argv) == 3, sys.argv
     config = yaml.safe_load(open(sys.argv[1]))
-    client = TotalConnectClient(config)
+    client = TCClient(config)
     target = sys.argv[2]
     client.collect(target)
     print(str(client.targetmap[target]))
