@@ -163,6 +163,7 @@ class Brainstem:
                         LOGGER.debug(f'action {action} inhibited by ratelimit')
                         return next_coro
                     self.ratelimits[action] = now
+                    LOGGER.info(f'action {action} allowed by ratelimit')
                 else:
                     LOGGER.warning(f'unknown function {funcname} {args}')
             else:
