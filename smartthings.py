@@ -44,12 +44,14 @@ class SmartThingsClient:
         if not stconfig.get('timeout'):
             stconfig['timeout'] = 10
 
-    def bearer_json_request(self, command, path, data=None):
+    def bearer_json_request(self, command, path, data=None, json=None):
         endpoint = '%s%s' % (self.API_PREFIX, path)
         headers = { 'Authorization': 'Bearer %s' % self.config['smartthings']['accesstoken'] }
         timeout = self.config['smartthings']['timeout']
         if data: # depending on command, data may not be allowed as an argument
             resp = command(endpoint, headers=headers, timeout=timeout, data=data)
+        elif json:
+            resp = command(endpoint, headers=headers, timeout=timeout, json=json)
         else:
             resp = command(endpoint, headers=headers, timeout=timeout)
         resp.raise_for_status()
@@ -77,8 +79,8 @@ class SmartThingsClient:
 
     async def run(self, target, selector, command, *args):
         """selector is deviceid[/capability[/component]]
-        command is the name of a command (e.g. "switch")
-        args are command arguments (e.g. "on" or "off")
+        command is the name of a command (e.g. "off")
+        args, if any, are command arguments (e.g. 75 for command "switchLevel")
         """
         capability = None
         component = None
@@ -86,12 +88,13 @@ class SmartThingsClient:
         if capacomponent:
             (capability, slash, component) = capacomponent.partition('/')
         capability = capability or command
-        data = { 'commands': [{'capability': capability, 'command': command, 'arguments': list(args)}] }
+        json = { 'commands': [ {'capability': capability, 'command': command } ] }
         if component:
-            data['commands'][0]['component'] = str(component)
-        LOGGER.info(f'executing {deviceid} {data}')
-        r = self.bearer_json_request(requests.post, f'/devices/{deviceid}/commands', data=data)
-        r.raise_for_status()
+            json['commands'][0]['component'] = str(component)
+        if args:
+            json['commands'][0]['arguments'] = list(args)
+        LOGGER.info(f'executing {deviceid} {json}')
+        r = self.bearer_json_request(requests.post, f'/devices/{deviceid}/commands', json=json)
         # see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/updateDevice
 
     @REQUEST_TIME.time()
