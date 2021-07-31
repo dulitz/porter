@@ -6,6 +6,8 @@ The SmartThings module for porter, the Prometheus exporter.
 To get a Personal Access Token, visit https://account.smartthings.com/tokens
 
 See https://smartthings.developer.samsung.com/docs/api-ref/st-api.html
+    https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/executeDeviceCommands
+    https://github.com/andrewsayre/pysmartthings
 """
 
 import json, logging, prometheus_client, requests, time, threading
@@ -95,7 +97,6 @@ class SmartThingsClient:
             json['commands'][0]['arguments'] = list(args)
         LOGGER.info(f'executing {deviceid} {json}')
         r = self.bearer_json_request(requests.post, f'/devices/{deviceid}/commands', json=json)
-        # see https://smartthings.developer.samsung.com/docs/api-ref/st-api.html#operation/updateDevice
 
     @REQUEST_TIME.time()
     def collect(self, target):
