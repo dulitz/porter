@@ -124,7 +124,7 @@ Someday this may be a form. Today is not that day.
             logs = LOG_STREAM.getvalue()
             output = b'<html><head><title>Porter Logging</title></head><body><h1>Porter Logging</h1>' + b'\n'.join([statusp(m) for m in ['', 'brainstem', 'lutron', 'netaxs', 'totalconnect']]) + b'\n<h1>Event Log</h1><pre>' + html.escape(logs).encode() + b'</pre></body></html>'
             if len(logs) > 1024*256:
-                LOG_STREAM = StringIO()
+                LOG_STREAM = io.StringIO()
                 global LOG_STREAM_HANDLER
                 LOG_STREAM_HANDLER.setStream(LOG_STREAM)
         elif path == '/config':
