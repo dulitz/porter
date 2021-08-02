@@ -123,6 +123,7 @@ class TeslaClient:
 
         def registervalue(metricname, v):
             if metricname == 'power' and v != 0:
+                LOGGER.debug(f'{vdata.get("display_name", "vehicle")} is awake with power {v}')
                 vehicle_awake = True
 
         xlatemap = {
