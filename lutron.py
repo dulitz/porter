@@ -241,6 +241,12 @@ class Lipservice:
         await self.lipserver.ping()
         return self.ping()
 
+    def _fullname_for_deviceid(self, deviceid):
+        (name, area, buttons) = self.cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', ''))
+        if not name:
+            (name, area) = self.cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+        return f'{name} {area}'
+
     def _increment_counter(self, map_of_counters, key, increment=1):
         new_value = map_of_counters.get(key, 0) + increment
         with self.cv:
@@ -273,13 +279,8 @@ class Lipservice:
                     self.eventbus.propagate((deviceid, 'scene', component))
                 else: # a standalone device
                     count = self._increment_counter(self.counts_by_deviceid_component, (deviceid, component))
-                    (name, area, buttons) = self.cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', ''))
-                    if not name:
-                        # in Illumination a sensor might be mistakenly entered as a dimmer
-                        (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
-                        if name:
-                            LOGGER.warning(f'{self.host} {deviceid} missing component {component}')
-                    self.eventbus.propagate((deviceid, f'{area} {name}', component))
+                    fullname = self._fullname_for_deviceid(deviceid)
+                    self.eventbus.propagate((deviceid, fullname, component))
             elif action == liplib.LipServer.Button.LEDSTATE:
                 if component > self.SEETOUCH_MAGIC and component < 20 + self.SEETOUCH_MAGIC:
                     component -= self.SEETOUCH_MAGIC
@@ -287,7 +288,12 @@ class Lipservice:
                 if cmap is None:
                     cmap = {}
                     self.ledstates[deviceid] = cmap
-                cmap[component] = int(param)
+                ival = int(param)
+                previous = cmap.get(component, ival)
+                if previous != ival:
+                    fullname = self._fullname_for_deviceid(deviceid)
+                    self.eventbus.propagate((deviceid, fullname, 'ledstate', component, ival))
+                cmap[component] = ival
             # We ignore button releases even though that is where the action is taken.
             # Thus we also ignore double-press and long-press that can be reported
             # by Homeworks QS.
@@ -296,15 +302,22 @@ class Lipservice:
             deviceid, action, level = b, c, d
             self.last_ping = time.time()
             if action == liplib.LipServer.Action.SET:
+                previous = self.outputlevels.get(deviceid, level)
+                if previous != level:
+                    fullname = self._fullname_for_deviceid(deviceid)
+                    self.eventbus.propagate((deviceid, fullname, 'level', level))
                 self.outputlevels[deviceid] = level
             elif action == liplib.LipServer.Action.RAISING:
-                # valid response, but outputlevel will be reported later so we ignore this
-                pass
+                # outputlevel will be reported later
+                fullname = self._fullname_for_deviceid(deviceid)
+                self.eventbus.propagate((deviceid, fullname, 'raising'))
             elif action == liplib.LipServer.Action.LOWERING:
-                # valid response, but outputlevel will be reported later so we ignore this
-                pass
+                # outputlevel will be reported later
+                fullname = self._fullname_for_deviceid(deviceid)
+                self.eventbus.propagate((deviceid, fullname, 'lowering'))
             elif action == liplib.LipServer.Action.STOP:
-                pass
+                fullname = self._fullname_for_deviceid(deviceid)
+                self.eventbus.propagate((deviceid, fullname, 'stop'))
             elif a == 'SHADEGRP' and action == liplib.LipServer.Action.PRESET:
                 pass # for Homeworks QS: activate the preset of a shade group
             elif action == 29 or action == 30:
@@ -328,6 +341,8 @@ class Lipservice:
                 val = 100 if param == 3 else 0 if param == 4 else -1
                 if val == -1:
                     LOGGER.warning(f'unknown GROUP param {param} for deviceid {deviceid} on  {self.host}:{self.port}')
+                fullname = self._fullname_for_deviceid(deviceid)
+                self.eventbus.propagate((deviceid, fullname, 'occupancy', val))
                 self.outputlevels[deviceid] = val
             else:
                 LOGGER.warning(f'unknown GROUP action {action} {param} for deviceid {deviceid} on {self.host}:{self.port}')
@@ -345,15 +360,24 @@ class Lipservice:
         elif a == 'KLS': # reported by Homeworks Illumination
             deviceid, ledstates = int(b), str(int(c))
             self.last_ping = time.time()
+            fullname = self._fullname_for_deviceid(deviceid)
             leadingzeroes = 24 - len(ledstates)
             cmap = self.ledstates.get(deviceid)
             if cmap is None:
                 cmap = {}
                 self.ledstates[deviceid] = cmap
+            def set_cmap(component, val):
+                previous = cmap.get(component, val)
+                if previous != val:
+                    self.eventbus.propagate((deviceid, fullname, 'ledstate', component, val))
+                cmap[component] = val
             for z in range(leadingzeroes):
-                cmap[z+1] = 0
+                set_cmap(z+1, 0)
             for (count, val) in enumerate(ledstates):
-                cmap[count+leadingzeroes+1] = int(val)
+                # 6 is undocumented but so far seen only on CCI inputs.
+                # 9 is undocumented and seems to correspond to LED off.
+                ival = 0 if val == '9' else int(val)
+                set_cmap(count+leadingzeroes+1, ival)
         elif a == 'SVS': # reported by Illumination but illiplib doesn't support
             self.last_ping = time.time()
         elif a == 'ERROR':
