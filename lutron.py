@@ -275,8 +275,10 @@ class Lipservice:
                     count = self._increment_counter(self.counts_by_deviceid_component, (deviceid, component))
                     (name, area, buttons) = self.cfparams.deviceid_to_sensortuple.get(deviceid, ('', '', ''))
                     if not name:
-                        # can happen in Illumination
+                        # in Illumination a sensor might be mistakenly entered as a dimmer
                         (name, area) = cfparams.deviceid_to_dimmertuple.get(deviceid, ('', ''))
+                        if name:
+                            LOGGER.warning(f'{self.host} {deviceid} missing component {component}')
                     self.eventbus.propagate((deviceid, f'{area} {name}', component))
             elif action == liplib.LipServer.Button.LEDSTATE:
                 if component > self.SEETOUCH_MAGIC and component < 20 + self.SEETOUCH_MAGIC:
