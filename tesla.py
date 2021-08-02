@@ -122,6 +122,7 @@ class TeslaClient:
             return gmf
 
         def registervalue(metricname, v):
+            nonlocal vehicle_awake
             if metricname == 'power' and v != 0:
                 LOGGER.debug(f'{vdata.get("display_name", "vehicle")} is awake with power {v}')
                 vehicle_awake = True
