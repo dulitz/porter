@@ -289,8 +289,8 @@ class Lipservice:
                     cmap = {}
                     self.ledstates[deviceid] = cmap
                 ival = int(param)
-                previous = cmap.get(component, ival)
-                if previous != ival:
+                previous = cmap.get(component)
+                if previous != ival and previous is not None:
                     fullname = self._fullname_for_deviceid(deviceid)
                     self.eventbus.propagate((deviceid, fullname, 'ledstate', component, ival))
                 cmap[component] = ival
@@ -302,8 +302,8 @@ class Lipservice:
             deviceid, action, level = b, c, d
             self.last_ping = time.time()
             if action == liplib.LipServer.Action.SET:
-                previous = self.outputlevels.get(deviceid, level)
-                if previous != level:
+                previous = self.outputlevels.get(deviceid)
+                if previous != level and previous is not None:
                     fullname = self._fullname_for_deviceid(deviceid)
                     self.eventbus.propagate((deviceid, fullname, 'level', level))
                 self.outputlevels[deviceid] = level
@@ -367,8 +367,8 @@ class Lipservice:
                 cmap = {}
                 self.ledstates[deviceid] = cmap
             def set_cmap(component, val):
-                previous = cmap.get(component, val)
-                if previous != val:
+                previous = cmap.get(component)
+                if previous != val and previous is not None:
                     self.eventbus.propagate((deviceid, fullname, 'ledstate', component, val))
                 cmap[component] = val
             for z in range(leadingzeroes):
