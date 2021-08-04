@@ -573,13 +573,18 @@ class NetaxsClient:
             # TODO: should we update last_swiped?
         elif 'database update' in low:
             eventbus.propagate(('', d['description'], plp))
+            LOGGER.warning(f'{session.uri} {low} {d}')
             self._increment(last['dbupdate'], lp)
-        elif 'tamper' in low:
+        elif 'online' in low:
             eventbus.propagate(('', d['description'], plp))
+            LOGGER.info(f'{session.uri} {low} {d}')
+        elif 'tamper' in low or 'offline' in low or 'restarted' in low:
+            eventbus.propagate(('', d['description'], plp))
+            LOGGER.warning(f'{session.uri} {low}: {d}')
             self._increment(last, 'tamper')
         else:
             eventbus.propagate(('', d['description'], plp))
-            LOGGER.info(f'{session.uri} {low}: {d}')
+            LOGGER.warning(f'{session.uri} [unknown event type] {low} {d}')
             self._increment(last, 'unknowneventtypes')
         last['timestamp'] = max(d['when'], last['timestamp'])
 
