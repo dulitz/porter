@@ -38,7 +38,7 @@ def collect(target):
     for apikey in awconfig['apiKeys']:
         resp = requests.get("https://api.ambientweather.net/v1/devices?applicationKey={}&apiKey={}".format(awconfig['applicationKey'], apikey))
         if resp.status_code == 401:
-            LOGGER.warning(f'got status 401 for {resp.request}; should be transient')
+            LOGGER.info(f'status 401 for {resp.request.url} should be transient')
             continue
         resp.raise_for_status()
 
