@@ -63,7 +63,7 @@ class RinnaiClient:
                     c = self.emailtoclient.get(target)
                     assert c, target # self.get_devices() above ensures this
                     if command == 'start_recirculation':
-                        LOGGER.info(f'start_recirculation {device["device_name"]} {args}')
+                        LOGGER.info(f'executing start_recirculation {device["device_name"]} {args}')
                         c.start_recirculation(device, int(args[0]))
                     else:
                         LOGGER.warning(f'unknown command {command} for {target} {selector}')
