@@ -86,12 +86,12 @@ class TeslaClient:
                     # This is the complicated case: we want to gather data
                     # opportunistically, but not so often we keep the vehicle
                     # awake. If it is online and we have no cache, or if it is
-                    # powered up, then something else woke it up and we should
-                    # grab data now. If our cache is too old, we refresh. Otherwise
-                    # we return cached data to make sure we don't wake the vehicle.
+                    # powered up, then something else awakened it and we should grab
+                    # data now. If our cache is too old, we refresh. Otherwise we
+                    # return cached data to make sure we don't keep the vehicle awake.
                     (cachetime, cache, awake) = self.vehicle_cache.get(vkey, (0, None, True))
                     if now - cachetime > self.vehicle_cache_time or awake:
-                        LOGGER.debug(f'refreshing cache for {vkey}')
+                        LOGGER.debug(f'refreshing cache for {"awake " if awake else ""}{vkey}')
                         (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
                         self.vehicle_cache[vkey] = (now, cache, awake)
                     gmflist += cache
@@ -103,7 +103,7 @@ class TeslaClient:
                     (gmf_summary, awake) = self._collect_vehicle(summary)
                     gmflist += gmf_summary
                     if self.vehicle_cache.get(vkey, (0, None, True))[0]:
-                        LOGGER.debug(f'invalidating cache for {vkey}')
+                        LOGGER.debug(f'invalidating cache for offline {vkey}')
                     self.vehicle_cache[vkey] = (0, None, True)
             for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
@@ -125,6 +125,9 @@ class TeslaClient:
             nonlocal vehicle_awake
             if metricname == 'power' and v != 0:
                 LOGGER.debug(f'{vdata.get("display_name", "vehicle")} is awake with power {v}')
+                vehicle_awake = True
+            elif metricname == 'charging_state' and v == 'charging':
+                LOGGER.debug(f'{vdata.get("display_name", "vehicle")} is awake with state {v}')
                 vehicle_awake = True
 
         xlatemap = {
