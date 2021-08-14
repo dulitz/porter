@@ -467,6 +467,7 @@ class NetaxsClient:
                 return func()
             except (json.decoder.JSONDecodeError,
                     requests.exceptions.ChunkedEncodingError):
+                LOGGER.info('reopening session to {session.uri} due to I/O error {func}')
                 session.close()
                 session.open()
                 tries -= 1
