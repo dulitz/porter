@@ -3,6 +3,7 @@
 from __future__ import unicode_literals
 
 import copy, html, io, logging, threading
+LOGGER = logging.getLogger('porter.prometheus')
 
 from datetime import datetime
 from socketserver import ThreadingMixIn
@@ -105,8 +106,10 @@ Someday this may be a form. Today is not that day.
             logger = logging.getLogger(f'porter.{module}') if module else logging.root
             if params.get('level', [''])[0].lower() == 'debug':
                 logger.setLevel(logging.DEBUG)
+                LOGGER.info(f'set DEBUG level for {module}')
             elif params.get('level', [''])[0].lower() == 'info':
                 logger.setLevel(logging.INFO)
+                LOGGER.info(f'set INFO level for {module}')
             def statusp(module):
                 modspec = f'&module={html.escape(module)}' if module else ''
                 logger = logging.getLogger(f'porter.{module}') if module else logging.root
@@ -129,6 +132,7 @@ Someday this may be a form. Today is not that day.
                 LOG_STREAM = io.StringIO()
                 global LOG_STREAM_HANDLER
                 LOG_STREAM_HANDLER.setStream(LOG_STREAM)
+                LOGGER.info(f'rotated log buffer with length {len(logs)}')
         elif path == '/config':
             status = '200 OK'
             header = ('', '')
