@@ -465,7 +465,8 @@ class NetaxsClient:
         while True:
             try:
                 return func()
-            except json.decoder.JSONDecodeError:
+            except (json.decoder.JSONDecodeError,
+                    requests.exceptions.ChunkedEncodingError):
                 session.close()
                 session.open()
                 tries -= 1
