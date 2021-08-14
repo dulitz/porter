@@ -39,10 +39,9 @@ It's pretty easy to add a new module.
 TODO: serve / with form for /probe along with recent statuses
   e.g. /probe&target=80845&module=purpleair
 TODO: serve /config to dump the configuration
-TODO: move from hardcoded to config file
 """
 
-import asyncio, json, logging, prometheus_client, requests, threading, time, yaml
+import asyncio, json, logging, prometheus_client, requests, threading, sys, time, yaml
 from prometheus_client.core import GaugeMetricFamily
 from prometheus_client.registry import REGISTRY
 from subprocess import TimeoutExpired
@@ -202,7 +201,11 @@ class Porter:
                     while True:
                         (done, awaiting) = await asyncio.wait(awaiting, timeout=None, return_when=asyncio.FIRST_COMPLETED)
                         for d in done:
-                            r = d.result()
+                            try:
+                                r = d.result()
+                            except Exception as exc:
+                                LOGGER.critical(f'uncaught exception {exc} in async task {d}; exiting', exc_info=exc)
+                                sys.exit(255)
                             if r:
                                 awaiting.add(r)
                 asyncio.run(async_loop())
