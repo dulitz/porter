@@ -467,7 +467,8 @@ class LipserviceManager:
             (done, self.tasks_pending) = await asyncio.wait(
                 self.tasks_pending, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
-                # as each poll() or ping() completes, schedule it to run again
+                # As each poll() or ping() completes, schedule it to run again.
+                # If task exited with an exception, result() will raise it now.
                 r = task.result()
                 if r:
                     self.tasks_pending.add(asyncio.create_task(r))
