@@ -497,6 +497,7 @@ class NetaxsClient:
         except Exception as ex:
             LOGGER.error(f'{session.uri}: error reading websocket', exc_info=ex)
             await asyncio.sleep(1) # rate limiting
+            # FIXME: if this happens repeatedly we should try to reconnect
         # schedule ourselves to run again
         return self._coro_for_session(target, session)
 
