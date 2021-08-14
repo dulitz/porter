@@ -101,7 +101,7 @@ class TCClient:
                         success = loc.get_zone_details() and success
                         success = loc.get_panel_meta_data() and success
                         if not success:
-                            raise Exception('TODO: fix exception handling')
+                            raise Exception(f'{loc.location_name} TODO: fix exception handling')
                         self.consecutive_metadata_failures = 0
                     except Exception as e:
                         self.consecutive_metadata_failures += 1
