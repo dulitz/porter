@@ -4,6 +4,7 @@ from __future__ import unicode_literals
 
 import copy, html, io, logging, threading
 
+from datetime import datetime
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, quote_plus, urlparse
 from wsgiref.simple_server import make_server, WSGIRequestHandler, WSGIServer
@@ -122,7 +123,8 @@ Someday this may be a form. Today is not that day.
             header = ('', '')
             global LOG_STREAM
             logs = LOG_STREAM.getvalue()
-            output = b'<html><head><title>Porter Logging</title></head><body><h1>Porter Logging</h1>' + b'\n'.join([statusp(m) for m in ['', 'brainstem', 'lutron', 'netaxs', 'tesla', 'totalconnect']]) + b'\n<h1>Event Log</h1><pre>' + html.escape(logs).encode() + b'</pre></body></html>'
+            now = datetime.utcnow().ctime()
+            output = b'<html><head><title>Porter Logging</title></head><body><h1>Porter Logging</h1>' + b'\n'.join([statusp(m) for m in ['', 'brainstem', 'lutron', 'netaxs', 'tesla', 'totalconnect']]) + b'\n<h1>Event Log</h1><pre>' + html.escape(logs).encode() + b'</pre><p>This page generated at ' + html.escape(now).encode() + b' UTC</body></html>'
             if len(logs) > 1024*256:
                 LOG_STREAM = io.StringIO()
                 global LOG_STREAM_HANDLER
