@@ -38,7 +38,8 @@ def collect(target):
     for apikey in awconfig['apiKeys']:
         resp = requests.get("https://api.ambientweather.net/v1/devices?applicationKey={}&apiKey={}".format(awconfig['applicationKey'], apikey))
         if resp.status_code == 401:
-            LOGGER.info(f'status 401 for {resp.request.url} should be transient')
+            (beforequery, q, after) = resp.request.url.partition('?')
+            LOGGER.info(f'status 401 for {beforequery} should be transient')
             continue
         resp.raise_for_status()
 
@@ -47,6 +48,9 @@ def collect(target):
             name = sensor.get('info', {}).get('name', '')
             labels = [macaddress, name]
             for (k, v) in sensor.get('lastData', {}).items():
+                if v is None:
+                    LOGGER.debug(f'{k} has value None for sensor {name}')
+                    continue
                 if k == 'winddir':
                     g = makegauge('wind_direction_degrees', 'wind direction')
                     g.add_metric(labels, float(v))
