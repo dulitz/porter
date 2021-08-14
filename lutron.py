@@ -415,7 +415,7 @@ class Lipservice:
                 if args[0] not in buttons:
                     LOGGER.warning(f'{command} {args[0]} not in {buttons}')
                 component = args[0] + self.SEETOUCH_MAGIC
-                PRESS = liplib.LipServer.Action.PRESS
+                PRESS = liplib.LipServer.Button.PRESS
                 LOGGER.debug(f'{command} {args[0]} executes as DEVICE {deviceid} {component} {PRESS}')
                 await self.lipserver.write('DEVICE', deviceid, component, PRESS)
 
