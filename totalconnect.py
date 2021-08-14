@@ -97,9 +97,11 @@ class TCClient:
             for loc in client.locations.values():
                 if not fresh_data:
                     try:
-                        loc.get_partition_details()
-                        loc.get_zone_details()
-                        loc.get_panel_meta_data()
+                        success = loc.get_partition_details()
+                        success = loc.get_zone_details() and success
+                        success = loc.get_panel_meta_data() and success
+                        if not success:
+                            raise Exception('TODO: fix exception handling')
                         self.consecutive_metadata_failures = 0
                     except Exception as e:
                         self.consecutive_metadata_failures += 1
