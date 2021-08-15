@@ -16,6 +16,7 @@ import asyncio, json, logging, time, threading, ssl
 import requests, prometheus_client, pytz, websockets
 
 from datetime import datetime
+from enum import Enum
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
@@ -30,6 +31,14 @@ class NetaxsError(Exception):
 
 
 class Session:
+    class _Request(Enum):
+        """When sync code wants async code to close or (re)open the websocket,
+        self.async_request is set to CLOSE or OPEN.
+        """
+        NONE  = 0
+        OPEN  = 1
+        CLOSE = 2
+
     def __init__(self, uri, user, password, timeout, verify=None, timezone=''):
         """The password must have already been hashed according to the NetAXS algorithm."""
         self.uri, self.user, self.password = uri, user, password
@@ -42,11 +51,12 @@ class Session:
             self.uri = self.uri[:len(self.uri)-1]
         self.cv = threading.Condition()
         self.websocket = None
+        self.async_request = _Request.NONE
 
     def open(self):
         if self.session:
             return
-        LOGGER.info(f'opened connection to {self.uri}')
+        LOGGER.info(f'opening connection to {self.uri}')
         LOGIN_ATTEMPTS.labels(uri=self.uri).inc()
         self.session = requests.Session()
         self.session.verify = self.verify
@@ -77,18 +87,23 @@ class Session:
         pp = self.session.post(f'{self.uri}/views/home/index.lsp', data={ 'ba_username': self.user, 'ba_password': self.password }, timeout=self.timeout)
         pp.raise_for_status()
         self._debug('afterlogin', pp)
+        self.async_request = _Request.OPEN  # open or re-open as needed
   
     def close(self):
         self.session.close()
         self.session = None
-        if self.websocket:
-            ### TODO await self.websocket.close()
-            self.websocket = None
+        self.async_request = _Request.CLOSE
+
+    async def async_close(self):
+        await self.websocket.close()
+        self.websocket = None
+        self.async_request = _Request.NONE
 
     async def async_open(self):
         assert self.session  # must be signed in
         self.readlock, self.writelock = asyncio.Lock(), asyncio.Lock()
         if not self.websocket:
+            LOGGER.info(f'opening websocket for {self.uri}')
             sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             sslcontext.load_verify_locations(self.verify)
             self.wssuri = f'{self.uri}/views/EventHandlerIntf/'.replace('https', 'wss', 1)
@@ -97,15 +112,31 @@ class Session:
             self.websocket = await websockets.connect(
                 self.wssuri, ssl=sslcontext, origin=self.uri, max_size=4096, max_queue=1024,
                 ping_interval=None, ping_timeout=None, extra_headers=extra_headers)
+            # FIXME: race condition here, where close() and open() may be called
+            # on the session while we are still connecting in the line above, but
+            # then we overwrite the new OPEN request in the line below
+            self.async_request = _Request.NONE
+
+    async def handle_async_request(self):
+        assert self.websocket  # must have called async_open()
+        if self.async_request == _Request.OPEN:
+            if self.websocket:
+                await self.async_close()
+            await self.async_open()
+        elif self.async_request == _Request.CLOSE:
+            if self.websocket:
+                await self.async_close()
 
     async def write_message(self, message):
         assert self.websocket  # must call async_open() first
+        await self.handle_async_request()
         LOGGER.debug(f'sending {message} on {self.wssuri}')
         async with self.writelock:
             return await self.websocket.send(message)
 
     async def read_event(self):
         assert self.websocket  # must have called async_open()
+        await self.handle_async_request()
         async with self.readlock:
             async for message in self.websocket:
                 js = json.loads(message.replace("'", '"'))
