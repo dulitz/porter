@@ -51,7 +51,7 @@ class Session:
             self.uri = self.uri[:len(self.uri)-1]
         self.cv = threading.Condition()
         self.websocket = None
-        self.async_request = _Request.NONE
+        self.async_request = Session._Request.NONE
 
     def open(self):
         if self.session:
@@ -87,17 +87,17 @@ class Session:
         pp = self.session.post(f'{self.uri}/views/home/index.lsp', data={ 'ba_username': self.user, 'ba_password': self.password }, timeout=self.timeout)
         pp.raise_for_status()
         self._debug('afterlogin', pp)
-        self.async_request = _Request.OPEN  # open or re-open as needed
+        self.async_request = Session._Request.OPEN  # open or re-open as needed
   
     def close(self):
         self.session.close()
         self.session = None
-        self.async_request = _Request.CLOSE
+        self.async_request = Session._Request.CLOSE
 
     async def async_close(self):
         await self.websocket.close()
         self.websocket = None
-        self.async_request = _Request.NONE
+        self.async_request = Session._Request.NONE
 
     async def async_open(self):
         assert self.session  # must be signed in
@@ -115,15 +115,15 @@ class Session:
             # FIXME: race condition here, where close() and open() may be called
             # on the session while we are still connecting in the line above, but
             # then we overwrite the new OPEN request in the line below
-            self.async_request = _Request.NONE
+            self.async_request = Session._Request.NONE
 
     async def handle_async_request(self):
         assert self.websocket  # must have called async_open()
-        if self.async_request == _Request.OPEN:
+        if self.async_request == Session._Request.OPEN:
             if self.websocket:
                 await self.async_close()
             await self.async_open()
-        elif self.async_request == _Request.CLOSE:
+        elif self.async_request == Session._Request.CLOSE:
             if self.websocket:
                 await self.async_close()
 
