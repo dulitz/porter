@@ -90,14 +90,17 @@ class Session:
         self.async_request = Session._Request.OPEN  # open or re-open as needed
   
     def close(self):
+        LOGGER.info(f'closing connection to {self.uri}')
         self.session.close()
         self.session = None
         self.async_request = Session._Request.CLOSE
 
     async def async_close(self):
+        LOGGER.info(f'closing websocket for {self.uri}')
         await self.websocket.close()
         self.websocket = None
-        self.async_request = Session._Request.NONE
+        # FIXME: commented this out to avoid race condition
+        # self.async_request = Session._Request.NONE
 
     async def async_open(self):
         assert self.session  # must be signed in
@@ -498,7 +501,7 @@ class NetaxsClient:
                 return func()
             except (json.decoder.JSONDecodeError,
                     requests.exceptions.ChunkedEncodingError):
-                LOGGER.info('closing session to {session.uri} due to I/O error {func}')
+                LOGGER.info(f'closing session {session.uri} due to I/O error {func}')
                 session.close()
                 session.open()
                 tries -= 1
