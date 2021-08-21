@@ -72,7 +72,7 @@ class TeslaClient:
         for (user, client) in self.usertoclient.items():
             client.fetch_token() # refresh our token if needed
             for v in client.vehicle_list():
-                gmflist += self._cache_or_collect_vehicle(self, target, v)
+                gmflist += self._cache_or_collect_vehicle(target, v)
             for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
         return gmflist
