@@ -72,42 +72,53 @@ class TeslaClient:
         for (user, client) in self.usertoclient.items():
             client.fetch_token() # refresh our token if needed
             for v in client.vehicle_list():
-                summary = v.get_vehicle_summary()
-                vkey = v['id_s'] # Vehicle is not hashable
-                now = time.time()
-                if target == summary.get('vin'):
-                    # then we were given the vin directly, so get fresh data even
-                    # if we wake the car up or keep it from going to sleep
-                    v.sync_wake_up()
-                    (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
-                    self.vehicle_cache[vkey] = (now, cache, awake)
-                    gmflist += cache
-                elif summary.get('state', '').lower() == 'online':
-                    # This is the complicated case: we want to gather data
-                    # opportunistically, but not so often we keep the vehicle
-                    # awake. If it is online and we have no cache, or if it is
-                    # powered up, then something else awakened it and we should grab
-                    # data now. If our cache is too old, we refresh. Otherwise we
-                    # return cached data to make sure we don't keep the vehicle awake.
-                    (cachetime, cache, awake) = self.vehicle_cache.get(vkey, (0, None, True))
-                    if now - cachetime > self.vehicle_cache_time or awake:
-                        LOGGER.debug(f'refreshing cache for {"awake " if awake else ""}{vkey}')
-                        (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
-                        self.vehicle_cache[vkey] = (now, cache, awake)
-                    gmflist += cache
-                else:
-                    # At this point we weren't given the vin directly and the car
-                    # is not online, so only return (known good) summary data. We
-                    # invalidate the cache because when the car comes back online
-                    # we should get fresh data, as someone else woke it up.
-                    (gmf_summary, awake) = self._collect_vehicle(summary)
-                    gmflist += gmf_summary
-                    if self.vehicle_cache.get(vkey, (0, None, True))[0]:
-                        LOGGER.debug(f'invalidating cache for offline {vkey}')
-                    self.vehicle_cache[vkey] = (0, None, True)
+                gmflist += self._cache_or_collect_vehicle(self, target, v)
             for b in client.battery_list():
                 gmflist += self._collect_battery(b.get_battery_data())
         return gmflist
+
+    def _cache_or_collect_vehicle(self, target, v):
+        summary = v.get_vehicle_summary()
+        vkey = v['id_s']  # Vehicle is not hashable
+        now = time.time()
+
+        if target == summary.get('vin'):
+            # then we were given the vin directly, so get fresh data even
+            # if we wake the car up or keep it from going to sleep
+            v.sync_wake_up()
+            (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
+            self.vehicle_cache[vkey] = (now, cache, awake)
+            return cache
+
+        if summary.get('state', '').lower() == 'online':
+            # This is the complicated case: we want to gather data
+            # opportunistically, but not so often we keep the vehicle
+            # awake. If it is online and we have no cache, or if it is
+            # powered up, then something else awakened it and we should grab
+            # data now. If our cache is too old, we refresh. Otherwise we
+            # return cached data to make sure we don't keep the vehicle awake.
+            (cachetime, cache, awake) = self.vehicle_cache.get(vkey, (0, None, True))
+            if now - cachetime <= self.vehicle_cache_time and not awake:
+                return cache
+            LOGGER.debug(f'refreshing cache for {"awake " if awake else ""}{vkey}')
+            try:
+                (cache, awake) = self._collect_vehicle(v.get_vehicle_data())
+                self.vehicle_cache[vkey] = (now, cache, awake)
+                return cache
+            except teslapy.HTTPError as e:
+                if e.response.status_code != 408:
+                    raise
+                # if it was 408, then fall through since it isn't really online
+                LOGGER.debug(f'status 408 for {vkey}: using summary')
+
+        # If we get here, it's because the car is offline.
+        # We invalidate the cache because when the car comes back online
+        # we should get fresh data, as someone else woke it up.
+        (gmf_summary, awake) = self._collect_vehicle(summary)
+        if self.vehicle_cache.get(vkey, (0, None, True))[0]:
+            LOGGER.debug(f'invalidating cache for offline {vkey}')
+        self.vehicle_cache[vkey] = (0, None, True)
+        return gmf_summary
 
     def _collect_vehicle(self, vdata):
         vehicle_awake = False
