@@ -115,7 +115,7 @@ class Brainstem:
     def __init__(self, config):
         self.config = config
         self.module_to_client = {}
-        myconfig = self.config['brainstem']
+        myconfig = self.config.get('brainstem', {})
         self.timers = Timers(myconfig.get('timers', []), self.run)
         self.reactions = {}
         self.ratelimits = {}
