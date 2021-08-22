@@ -140,8 +140,10 @@ class Session:
             return await self.websocket.send(message)
 
     async def read_event(self):
-        assert self.websocket  # must have called async_open()
-        await self.handle_async_request()
+        if not self.websocket:
+            await self.async_open()
+        else:
+            await self.handle_async_request()
         async with self.readlock:
             async for message in self.websocket:
                 js = json.loads(message.replace("'", '"'))
