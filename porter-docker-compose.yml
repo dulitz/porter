@@ -22,9 +22,8 @@ version: '3'
 services:
 
   porter:
+    container_name: porter
     image: porter:latest
-    # next line commented out because we isolate build from push to maximize uptime
-    # build: ../porter
     ports:
       - "5700:5728"
     restart: always
@@ -33,3 +32,4 @@ services:
       - ./cache.json:/var/lib/porter/cache.json:rw
       - ./porter.yml:/var/lib/porter/porter.yml:ro
       - ./EpispaceRoot.crt:/var/lib/porter/EpispaceRoot.crt:ro
+    build: ../porter
