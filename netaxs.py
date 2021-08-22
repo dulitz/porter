@@ -524,7 +524,12 @@ class NetaxsClient:
         try:
             if must_open:
                 await session.async_open()
-            ev = await session.read_event()
+            try:
+                ev = await session.read_event()
+            except websockets.exceptions.ConnectionClosedError:
+                session.websocket = None
+                await session.async_open()
+                ev = await session.read_event()
             last = session.last_porter
             last['successful_io_timestamp'] = max(time.time(), last['successful_io_timestamp'])
             logoff_minutes = ev.get('asyncLogoff')
