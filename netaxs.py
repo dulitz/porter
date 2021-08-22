@@ -52,12 +52,14 @@ class Session:
         self.cv = threading.Condition()
         self.websocket = None
         self.async_request = Session._Request.NONE
+        self.failed_fetches = 0
 
     def open(self):
         if self.session:
             return
         LOGGER.info(f'opening connection to {self.uri}')
         LOGIN_ATTEMPTS.labels(uri=self.uri).inc()
+        self.failed_fetches = 0
         self.session = requests.Session()
         self.session.verify = self.verify
 
@@ -327,7 +329,14 @@ class Session:
 
         self._set_headers()
         cards = self.session.get(f'{self.uri}/models/CardReport.csv', timeout=self.timeout)
+        if cards.status_code == 404:
+            self.failed_fetches += 1
+            if self.failed_fetches > 3:
+                LOGGER.error(f'{self.failed_fetches} consecutive failed fetches; reconnecting')
+                self.close()
+                self.open()
         cards.raise_for_status()
+        self.failed_fetches = 0
         self._debug('cards', cards)
 
         out = []
