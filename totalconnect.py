@@ -11,7 +11,7 @@ import logging, prometheus_client, threading, time
 from datetime import datetime, timedelta
 from dateutil.parser import isoparse
 from prometheus_client.core import GaugeMetricFamily
-from total_connect_client import TotalConnectClient
+from total_connect_client import TotalConnectClient, ZoneType
 
 LOGGER = logging.getLogger('porter.totalconnect')
 
@@ -34,44 +34,6 @@ class TCClient:
         self.cv = threading.Condition()
         self.consecutive_metadata_failures = 0
 
-    def statename_for_arming_status(self, status):
-        if status == 10200:
-            return 'disarmed'
-        elif status == 10211:
-            return 'disarmed-bypass'
-        elif status == 10201:
-            return 'armed away'
-        elif status == 10202:
-            return 'armed away bypass'
-        elif status == 10205:
-            return 'armed away instant'
-        elif status == 10206:
-            return 'armed away instant bypass'
-        elif status == 10223:
-            return 'armed custom bypass'
-        elif status == 10203:
-            return 'armed stay'
-        elif status == 10204:
-            return 'armed stay bypass'
-        elif status == 10209:
-            return 'armed stay instant'
-        elif status == 10210:
-            return 'armed stay instant bypass'
-        elif status == 10218:
-            return 'armed stay night'
-        elif status == 10307:
-            return 'arming'
-        elif status == 10308:
-            return 'disarming'
-        elif status == 10207:
-            return 'alarming'
-        elif status == 10212:
-            return 'alarming fire smoke'
-        elif status == 10213:
-            return 'alarming carbon monoxide'
-        else:
-            return 'unknown status %s' % status
-        
     @REQUEST_TIME.time()
     def collect(self, target):
         """get the status of each device at each location"""
@@ -97,11 +59,9 @@ class TCClient:
             for loc in client.locations.values():
                 if not fresh_data:
                     try:
-                        success = loc.get_partition_details()
-                        success = loc.get_zone_details() and success
-                        success = loc.get_panel_meta_data() and success
-                        if not success:
-                            raise Exception(f'{loc.location_name} TODO: fix exception handling')
+                        loc.get_partition_details()
+                        loc.get_zone_details()
+                        loc.get_panel_meta_data()
                         self.consecutive_metadata_failures = 0
                     except Exception as e:
                         self.consecutive_metadata_failures += 1
@@ -131,9 +91,8 @@ class TCClient:
         g = makegauge('cover_tampered', '1 if cover tampered, 0 if good')
         g.add_metric(labelvalues, 1 if loc.cover_tampered else 0)
         g = makegauge('arming_state', 'arming state of this location', labels=['state'])
-        g.add_metric(labelvalues + [self.statename_for_arming_status(loc.arming_state)],
-                     loc.arming_state)
-        g = makegauge('last_updated', 'timestamp of last update time')
+        g.add_metric(labelvalues + [loc.arming_state.name], loc.arming_state.value)
+        g = makegauge('last_updated', 'timestamp of last update time of the panel')
         # it reports in Windows ticks (of course, it's a SOAP API), so we
         # convert to Prometheus standard seconds-past-UNIX-epoch
         upd = datetime(1, 1, 1) + timedelta(microseconds=loc.last_updated_timestamp_ticks/10)
@@ -147,13 +106,17 @@ class TCClient:
                           labels=(labels+['state']))
             g.add_metric(labelvalues2 + [status], -1 if zone.status is None else zone.status)
             g = makegauge('alarm_zone_type', 'type of alarm zone', labels=(labels+['zonetype']))
-            vv = -1 if zone.zone_type_id is None else zone.zone_type_id
-            t = 'delay' if vv == 1 else 'instant' if vv == 3 else 'motion' if vv == 4 else 'button' if zone.is_type_button() else 'security' if zone.is_type_security() else 'motion' if zone.is_type_motion() else 'fire' if zone.is_type_fire() else 'carbon monoxide' if zone.is_type_carbon_monoxide() else 'unknown'
-            g.add_metric(labelvalues2 + [t], vv)
+            if isinstance(zone.zone_type_id, ZoneType):
+                vv = zone.zone_type_id.value
+                g.add_metric(labelvalues2 + [zone.zone_type_id.name], vv)
+            else:
+                vv = -1 if zone.zone_type_id is None else zone.zone_type_id
+                g.add_metric(labelvalues2 + ['unknown'], vv)
             g = makegauge('alarm_zone_can_bypass', '1 if zone can be bypassed, 0 otherwise',
                           labels=labels)
             vv = -1 if zone.can_be_bypassed is None else zone.can_be_bypassed
             g.add_metric(labelvalues2, vv)
+
 
 if __name__ == '__main__':
     import json, sys, yaml
