@@ -12,6 +12,8 @@ RUN mkdir /var/lib/porter
 
 ADD https://raw.githubusercontent.com/dulitz/porter/main/req.txt /var/lib/porter/req.txt
 
+RUN pip3 install --upgrade pip
+
 RUN pip3 install -r /var/lib/porter/req.txt
 
 # the next line causes the Docker cache to be invalidated when git changes
