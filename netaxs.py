@@ -527,11 +527,15 @@ class NetaxsClient:
             if must_open:
                 await session.async_open()
             try:
-                ev = await session.read_event()
+                #ev = await session.read_event()
+                ev = await asyncio.wait_for(session.read_event(), timeout=120)
+            except asyncio.TimeoutError:
+                LOGGER.info(f'{session.uri}: timeout reading websocket')
+                return self._coro_for_session(target, session)
             except websockets.exceptions.ConnectionClosedError:
                 session.websocket = None
-                await session.async_open()
-                ev = await session.read_event()
+                # schedule ourselves to run again
+                return self._coro_for_session(target, session, must_open=True)
             last = session.last_porter
             last['successful_io_timestamp'] = max(time.time(), last['successful_io_timestamp'])
             logoff_minutes = ev.get('asyncLogoff')
@@ -557,26 +561,15 @@ class NetaxsClient:
         """Awaits events from each active Session. When one comes in, we update
         in advance of our next Prometheus poll.
         """
-        awaiting = set()
+        poller = AsyncPollingLoop('netaxs')
         while True:
             with self.cv:
                 for eventbus in self.targeteventbusmap.values():
                     eventbus.add_awaitables_to(self.awaitables)
                 for awaitable in self.awaitables:
-                    if isinstance(awaitable, asyncio.Task):
-                        awaiting.add(awaitable)
-                    else:
-                        awaiting.add(asyncio.create_task(awaitable))
+                    poller.add_to_awaiting(awaitable)
                 self.awaitables = set()
-            if not awaiting:
-                await asyncio.sleep(1)
-                continue
-            (done, awaiting) = await asyncio.wait(awaiting, timeout=1,
-                                                  return_when=asyncio.FIRST_COMPLETED)
-            for d in done:
-                r = d.result()
-                if r:
-                    awaiting.add(asyncio.create_task(r))
+            poller.wait()
 
     def _update_cards(self, session, now):
         last = session.last_porter
@@ -754,6 +747,40 @@ class NetaxsClient:
             cmf_tamper.add_metric([], last['tamper'])
 
         return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates, cmf_unknown, cmf_tamper]
+
+
+class AsyncPollingLoop:
+    AWAITING = prometheus_client.Gauge(
+        'porter_num_tasks', 'number of async tasks being awaited', ['loop']
+    )
+
+    def __init__(self, name, awaitables=[], poll_timeout=1):
+        self.name = name
+        self.poll_timeout = poll_timeout
+        self.awaiting = set()
+        for a in awaitables:
+            self.add_awaitable(a)
+
+    def add_awaitable(self, awaitable):
+        if awaitable:
+            if isinstance(awaitable, asyncio.Task):
+                self.awaiting.add(awaitable)
+            else:
+                self.awaiting.add(asyncio.create_task(awaitable))
+
+    async def wait(self):
+        AsyncPollingLoop.AWAITING.labels(loop=self.name).set(len(self.awaiting))
+        if not self.awaiting:
+            await asyncio.sleep(self.poll_timeout)
+            return set()
+        (done, self.awaiting) = await asyncio.wait(
+            self.awaiting,
+            timeout=self.poll_timeout,
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        for d in done:
+            self.add_to_awaiting(d.result())
+        return done
 
 
 class EventbusStub:
