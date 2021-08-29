@@ -17,6 +17,7 @@ import requests, prometheus_client, pytz, websockets
 
 from datetime import datetime
 from enum import Enum
+from urllib3.util.retry import Retry
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
@@ -569,7 +570,7 @@ class NetaxsClient:
                 for awaitable in self.awaitables:
                     poller.add_awaitable(awaitable)
                 self.awaitables = set()
-            poller.wait()
+            await poller.wait()
 
     def _update_cards(self, session, now):
         last = session.last_porter
