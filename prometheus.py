@@ -70,11 +70,11 @@ LOG_STREAM = io.StringIO()
 LOG_STREAM_HANDLER = logging.StreamHandler(LOG_STREAM)
 LOG_STREAM_HANDLER.setFormatter(logging.Formatter('%(asctime)s:%(name)s:%(levelname)s:%(message)s'))
 LOG_STREAM_HANDLER.setLevel(logging.DEBUG)
-logging.getLogger('porter').addHandler(LOG_STREAM_HANDLER)
+logging.getLogger().addHandler(LOG_STREAM_HANDLER)
 def set_console_handler():
     handler = logging.StreamHandler()
     handler.setLevel(logging.DEBUG)
-    logging.getLogger('porter').addHandler(handler)
+    logging.getLogger().addHandler(handler)
 #set_console_handler()
 
 
@@ -105,11 +105,13 @@ Someday this may be a form. Today is not that day.
             module = params.get('module', [''])[0].lower()
             logger = logging.getLogger(f'porter.{module}') if module else logging.root
             if params.get('level', [''])[0].lower() == 'debug':
-                logger.setLevel(logging.DEBUG)
-                LOGGER.info(f'set DEBUG level for {module}')
+                if logger.level != logging.DEBUG:
+                    logger.setLevel(logging.DEBUG)
+                    LOGGER.info(f'set DEBUG level for {module}')
             elif params.get('level', [''])[0].lower() == 'info':
-                logger.setLevel(logging.INFO)
-                LOGGER.info(f'set INFO level for {module}')
+                if logger.level != logging.INFO:
+                    logger.setLevel(logging.INFO)
+                    LOGGER.info(f'set INFO level for {module}')
             def statusp(module):
                 modspec = f'&module={html.escape(module)}' if module else ''
                 logger = logging.getLogger(f'porter.{module}') if module else logging.root
