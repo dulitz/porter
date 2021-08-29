@@ -567,7 +567,7 @@ class NetaxsClient:
                 for eventbus in self.targeteventbusmap.values():
                     eventbus.add_awaitables_to(self.awaitables)
                 for awaitable in self.awaitables:
-                    poller.add_to_awaiting(awaitable)
+                    poller.add_awaitable(awaitable)
                 self.awaitables = set()
             poller.wait()
 
@@ -779,7 +779,7 @@ class AsyncPollingLoop:
             return_when=asyncio.FIRST_COMPLETED
         )
         for d in done:
-            self.add_to_awaiting(d.result())
+            self.add_awaitable(d.result())
         return done
 
 
