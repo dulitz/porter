@@ -99,7 +99,8 @@ class Session:
         self.session.close()
         self.session = None
         self._cards_readahead = None
-        self.async_request = Session._Request.CLOSE
+        ### FIXME
+        ###self.async_request = Session._Request.CLOSE
 
     async def async_close(self):
         LOGGER.info(f'closing websocket for {self.uri}')
@@ -361,6 +362,7 @@ class Session:
                 self.close()
                 self.open()
         cards.raise_for_status()
+        LOGGER.debug(f'{self.uri} successfully fetched cards from server')
         self.failed_fetches = 0
         self._debug('cards', cards)
 
@@ -535,8 +537,9 @@ class NetaxsClient:
                 return func()
             except (json.decoder.JSONDecodeError,
                     requests.exceptions.ChunkedEncodingError) as e:
+                LOGGER.info(f'retrying fetch {session.uri} due to {e} in {func}')
                 tries -= 1
-                if tries == 1:
+                if tries == -1:  # FIXME disabled for now
                     LOGGER.info(f'closing session {session.uri} due to {e} in {func}')
                     session.close()
                     session.open()
@@ -564,7 +567,7 @@ class NetaxsClient:
                 return self._coro_for_session(target, session, must_open=True)
             last = session.last_porter
             last['successful_io_timestamp'] = max(time.time(), last['successful_io_timestamp'])
-            logoff_minutes = ev.get('asyncLogoff')
+            logoff_minutes = (ev or {}).get('asyncLogoff')
             if logoff_minutes is not None:
                 LOGGER.debug(f'{session.uri}: asyncLogoff in {logoff_minutes} min')
                 if logoff_minutes < 2:
