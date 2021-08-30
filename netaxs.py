@@ -54,6 +54,7 @@ class Session:
         self.websocket = None
         self.async_request = Session._Request.NONE
         self.failed_fetches = 0
+        self._cards_readahead = None
 
     def open(self):
         if self.session:
@@ -91,11 +92,13 @@ class Session:
         pp.raise_for_status()
         self._debug('afterlogin', pp)
         self.async_request = Session._Request.OPEN  # open or re-open as needed
+        self._cards_readahead = None
   
     def close(self):
         LOGGER.info(f'closing connection to {self.uri}')
         self.session.close()
         self.session = None
+        self._cards_readahead = None
         self.async_request = Session._Request.CLOSE
 
     async def async_close(self):
@@ -126,6 +129,7 @@ class Session:
                 LOGGER.info(f'{self.uri} rejected websocket connection; reopening')
                 self.close()
                 self.open()
+                self._cards_readahead = self.get_cards()
                 # we will attempt to reopen the websocket again next time
             # FIXME: race condition here, where close() and open() may be called
             # on the session while we are still connecting in the line above, but
@@ -154,6 +158,8 @@ class Session:
             await self.async_open()
         else:
             await self.handle_async_request()
+        if not self.websocket:
+            return  # catch it next time
         async with self.readlock:
             async for message in self.websocket:
                 js = json.loads(message.replace("'", '"'))
@@ -321,6 +327,10 @@ class Session:
         return out
 
     def get_cards(self):
+        if self._cards_readahead:
+            cards = self._cards_readahead
+            self._cards_readahead = None
+            return cards
         self._set_headers()
         data = {
             'panelnum': 1,
@@ -516,16 +526,17 @@ class NetaxsClient:
             self.targeteventbusmap[s.uri] = self.eventbus.target(target)
         return s
 
-    def _retry_if_needed(self, session, func, tries=1):
+    def _retry_if_needed(self, session, func, tries=3):
         while True:
             try:
                 return func()
             except (json.decoder.JSONDecodeError,
-                    requests.exceptions.ChunkedEncodingError):
-                LOGGER.info(f'closing session {session.uri} due to I/O error {func}')
-                session.close()
-                session.open()
+                    requests.exceptions.ChunkedEncodingError) as e:
                 tries -= 1
+                if tries == 1:
+                    LOGGER.info(f'closing session {session.uri} due to {e} in {func}')
+                    session.close()
+                    session.open()
                 if tries == 0:
                     raise
 
@@ -542,6 +553,7 @@ class NetaxsClient:
             except asyncio.TimeoutError:
                 LOGGER.info(f'{session.uri}: timeout reading websocket')
                 self.async_request = Session._Request.OPEN  # re-open
+                await asyncio.sleep(2)  # rate limiting
                 return self._coro_for_session(target, session)
             except websockets.exceptions.ConnectionClosedError:
                 session.websocket = None
