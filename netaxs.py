@@ -130,6 +130,7 @@ class Session:
                 self.close()
                 self.open()
                 self._cards_readahead = self.get_cards()
+                LOGGER.debug(f'{self.uri} successfully fetched readahead')
                 # we will attempt to reopen the websocket again next time
             # FIXME: race condition here, where close() and open() may be called
             # on the session while we are still connecting in the line above, but
@@ -328,9 +329,11 @@ class Session:
 
     def get_cards(self):
         if self._cards_readahead:
+            LOGGER.debug(f'{self.uri} consuming readahead')
             cards = self._cards_readahead
             self._cards_readahead = None
             return cards
+        LOGGER.debug(f'{self.uri} fetching cards from server')
         self._set_headers()
         data = {
             'panelnum': 1,
@@ -568,7 +571,7 @@ class NetaxsClient:
                     with session.cv:
                         LOGGER.debug(f'{session.uri}: updating cards for keepalive')
                         self._update_cards(session, time.time())
-            newevent = ev.get('asyncSendNewEvent')
+            newevent = (ev or {}).get('asyncSendNewEvent')
             if newevent:
                 LOGGER.debug(f'{session.uri}: new async event {newevent}')
                 with self.cv:
