@@ -532,6 +532,7 @@ class NetaxsClient:
                 ev = await asyncio.wait_for(session.read_event(), timeout=120)
             except asyncio.TimeoutError:
                 LOGGER.info(f'{session.uri}: timeout reading websocket')
+                self.async_request = Session._Request.OPEN  # re-open
                 return self._coro_for_session(target, session)
             except websockets.exceptions.ConnectionClosedError:
                 session.websocket = None
