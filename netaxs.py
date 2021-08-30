@@ -115,9 +115,18 @@ class Session:
             self.wssuri = f'{self.uri}/views/EventHandlerIntf/'.replace('https', 'wss', 1)
             cookies = '; '.join([f'{k}={v}' for (k, v) in self.session.cookies.items()])
             extra_headers = { 'Cookie': cookies }
-            self.websocket = await websockets.connect(
-                self.wssuri, ssl=sslcontext, origin=self.uri, max_size=4096, max_queue=1024,
-                ping_interval=None, ping_timeout=None, extra_headers=extra_headers)
+            try:
+                self.websocket = await websockets.connect(
+                    self.wssuri, ssl=sslcontext, origin=self.uri,
+                    max_size=4096, max_queue=1024,
+                    ping_interval=None, ping_timeout=None,
+                    extra_headers=extra_headers
+                )
+            except websockets.exceptions.InvalidStatusCode:
+                LOGGER.info(f'{self.uri} rejected websocket connection; reopening')
+                self.close()
+                self.open()
+                # we will attempt to reopen the websocket again next time
             # FIXME: race condition here, where close() and open() may be called
             # on the session while we are still connecting in the line above, but
             # then we overwrite the new OPEN request in the line below
