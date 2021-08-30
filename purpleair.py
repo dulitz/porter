@@ -1,15 +1,12 @@
-# purpleair.py
-#
-# the PurpleAir module for porter, the Prometheus exporter
-#
-# see https://www2.purpleair.com/community/faq#hc-access-the-json
-# and https://github.com/bomeara/purpleairpy/blob/master/api.md
-#
-# portions based on
-#    https://github.com/wbertelsen/purpleair-to-prometheus/blob/main/purple_to_prom.py
-# last modified 12 December 2020, current as of 1 May 2021, by https://github.com/wbertelsen/
-# provided under the MIT License.
+"""
+purpleair.py
 
+the PurpleAir module for porter, the Prometheus exporter
+
+see https://api.purpleair.com/
+
+To get an API key, send email to contact@purpleair.com
+"""
 
 import aqi, json, requests, prometheus_client, time
 
@@ -68,7 +65,8 @@ def collect(target):
 
         temp_f = sensor.get("temp_f")
         if temp_f:
-            tempc_gauge.add_metric([sensor_id, name], round((float(temp_f)-32)*5/9, 1))
+            # 8 degree adjustment factor according to PurpleAir
+            tempc_gauge.add_metric([sensor_id, name], round((float(temp_f)-32-8)*5/9, 1))
         pressure = sensor.get("pressure")
         if pressure:
             pressure_gauge.add_metric([sensor_id, name], float(pressure))
