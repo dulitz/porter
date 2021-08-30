@@ -226,9 +226,9 @@ class Porter:
         self.sshproxy.terminate()
 
 def main(args):
-    # we force the standard handler to be added, even though we have defined
-    # our own handler in prometheus.py -- not sure it really works though
-    logging.basicConfig(level=logging.INFO, force=True)
+    # we define our own log handlers at load time in prometheus.py so
+    # this will be ignored
+    logging.basicConfig(level=logging.INFO)
     configfile = 'porter.yml'
     if len(args) > 1:
         configfile = args[1]
