@@ -24,8 +24,10 @@ class SSHProxy:
             self.identityfiles = [self._makeidentityfile(k) for k in keys]
             self.command = ['ssh', '-aknxNT'] + ['-i%s' % f for f in self.identityfiles]
             self.rewrites = {k: tuple(v) for (k, v) in ours.items() if k != 'key'}
-            self.proxies, self.zombies = {}, []
-            self.proxies_cv = threading.Condition()
+        else:
+            self.identityfiles = []
+        self.proxies, self.zombies = {}, []
+        self.proxies_cv = threading.Condition()
 
     def _makeidentityfile(self, keystring):
         """write keystring (a private key) to an identifyfile in $HOME/porter-ssh-identities/<>
