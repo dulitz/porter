@@ -71,11 +71,12 @@ LOG_STREAM_HANDLER = logging.StreamHandler(LOG_STREAM)
 LOG_STREAM_HANDLER.setFormatter(logging.Formatter('%(asctime)s:%(name)s:%(levelname)s:%(message)s'))
 LOG_STREAM_HANDLER.setLevel(logging.DEBUG)
 logging.getLogger().addHandler(LOG_STREAM_HANDLER)
+logging.getLogger().setLevel(logging.INFO)
 def set_console_handler():
     handler = logging.StreamHandler()
     handler.setLevel(logging.DEBUG)
     logging.getLogger().addHandler(handler)
-#set_console_handler()
+set_console_handler()
 
 
 def make_wsgi_app(registry=REGISTRY, registry_view_factory=registry_view_factory):
