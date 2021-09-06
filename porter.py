@@ -53,7 +53,7 @@ import smartthings, tankutility, tesla, totalconnect
 from brainstem import Brainstem
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server, SilentException
-from async import AsyncPollingLoop
+from asynchelpers import AsyncPollingLoop
 
 
 class RequestError(Exception):

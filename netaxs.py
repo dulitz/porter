@@ -22,7 +22,7 @@ from enum import Enum
 from urllib3.util.retry import Retry
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
-from async import AsyncPollingLoop
+from asynchelpers import AsyncPollingLoop
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
                                          'time of netaxs requests')
