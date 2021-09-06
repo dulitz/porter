@@ -10,6 +10,8 @@ Tested with
 Since this isn't a documented API and I just hacked it from looking at the
 internals of the webapp, it should be expected to break whenever you
 update the device firmware.
+
+TODO: fix file descriptor leak when initial login fails due to ReadTimeout
 """
 
 import asyncio, json, logging, time, threading, ssl
@@ -19,6 +21,8 @@ from datetime import datetime
 from enum import Enum
 from urllib3.util.retry import Retry
 from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
+
+from async import AsyncPollingLoop
 
 REQUEST_TIME = prometheus_client.Summary('netaxs_processing_seconds',
                                          'time of netaxs requests')
@@ -777,40 +781,6 @@ class NetaxsClient:
             cmf_tamper.add_metric([], last['tamper'])
 
         return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates, cmf_unknown, cmf_tamper]
-
-
-class AsyncPollingLoop:
-    AWAITING = prometheus_client.Gauge(
-        'porter_num_tasks', 'number of async tasks being awaited', ['loop']
-    )
-
-    def __init__(self, name, awaitables=[], poll_timeout=1):
-        self.name = name
-        self.poll_timeout = poll_timeout
-        self.awaiting = set()
-        for a in awaitables:
-            self.add_awaitable(a)
-
-    def add_awaitable(self, awaitable):
-        if awaitable:
-            if isinstance(awaitable, asyncio.Task):
-                self.awaiting.add(awaitable)
-            else:
-                self.awaiting.add(asyncio.create_task(awaitable))
-
-    async def wait(self):
-        AsyncPollingLoop.AWAITING.labels(loop=self.name).set(len(self.awaiting))
-        if not self.awaiting:
-            await asyncio.sleep(self.poll_timeout)
-            return set()
-        (done, self.awaiting) = await asyncio.wait(
-            self.awaiting,
-            timeout=self.poll_timeout,
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        for d in done:
-            self.add_awaitable(d.result())
-        return done
 
 
 class EventbusStub:
