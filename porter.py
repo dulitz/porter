@@ -53,6 +53,8 @@ import smartthings, tankutility, tesla, totalconnect
 from brainstem import Brainstem
 from sshproxy import SSHProxy
 from prometheus import start_wsgi_server, SilentException
+from async import AsyncPollingLoop
+
 
 class RequestError(Exception):
     pass
@@ -196,18 +198,17 @@ class Porter:
         if awaitables:
             def loop():
                 async def async_loop():
-                    awaiting = awaitables
-                    LOGGER.info(f'started async polling loop, awaiting {len(awaiting)}')
+                    poller = AsyncPollingLoop('main', awaitables)
+                    LOGGER.info(f'started async polling loop, awaiting {len(awaitables)}')
                     while True:
-                        (done, awaiting) = await asyncio.wait(awaiting, timeout=None, return_when=asyncio.FIRST_COMPLETED)
-                        for d in done:
-                            try:
-                                r = d.result()
-                            except Exception as exc:
-                                LOGGER.critical(f'uncaught exception {exc} in async task {d}; exiting', exc_info=exc)
-                                sys.exit(255)
-                            if r:
-                                awaiting.add(r)
+                        if len(poller.awaiting) != len(awaitables):
+                            LOGGER.critical(f'main loop now awaiting {len(poller.awaiting)} -- exiting')
+                            sys.exit(255)
+                        try:
+                            poller.wait()
+                        except Exception as exc:
+                            LOGGER.critical(f'uncaught exception {exc} in main loop async task; exiting', exc_info=exc)
+                            sys.exit(255)
                 asyncio.run(async_loop())
 
             self.asyncthread = threading.Thread(target=loop, name="asyncio loop", daemon=True)
