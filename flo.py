@@ -18,11 +18,12 @@ REQUEST_TIME = prometheus_client.Summary('flo_processing_seconds',
 class FloException(Exception):
     pass
 
-# Flo can be queried for consumption within a time window but cannot be queried for a
-# counter directly (total gallons consumed). We maintain a counter metric for each device,
-# with its value starting at 0 at the time we are created. For each minute that elapses
-# after we are created, we request the minutely consumption within that minute and
-# add it to our counter at that timestamp.
+# Flo can be queried for consumption within a time window but cannot
+# be queried for a counter directly (total gallons consumed). We
+# maintain a counter metric for each device, with its value starting
+# at 0 at the time we are created. For each hour that elapses after we
+# are created, we request the hourly consumption and add it to our
+# counter at that timestamp.
 
 class Consumption:
     def __init__(self, deviceid, macaddress, location, devicenickname, client_start_timestamp):
@@ -110,7 +111,7 @@ class FloClient:
             if target_pyflo is None:
                 raise FloException(f'no config credentials for target {target}')
             if time.time() > self.refresh_time:
-                self.locationsmap = { targ: pyf.locations() for (targ, pyf) in self.pyflomap.items() }
+                self.locationsmap = { targ: pyf.locations(use_cached=False) for (targ, pyf) in self.pyflomap.items() }
                 self.refresh_time = time.time() + 86400
             locations = [loc.copy() for loc in self.locationsmap[target]]
 
@@ -176,6 +177,26 @@ class FloClient:
                 
         return [v for v in metric_to_gauge.values()] + [cmf]
 
+
+def print_consumption(myflo, id, dev):
+    lasttime = isoparse(dev['lastHeardFromTime'])
+    sd = lasttime.replace(minute=0, second=0, microsecond=0)
+    ed = sd + timedelta(minutes=5)
+    print(sd.isoformat(), ed.isoformat())
+    print(json.dumps(myflo.consumption(id, startDate=sd, endDate=ed, interval=pyflowater.INTERVAL_HOURLY), indent=2))
+    print(json.dumps(myflo.consumption(id, endDate=sd), indent=2))
+
+
+def print_callbacks(myflo, device, dev):
+    id = device['id']
+    def callback(dict):
+        print(time.ctime(), dict['telemetry']['current'])
+    listener = myflo.get_real_time_listener(device['macAddress'], callback)
+    listener._heartbeat_func = lambda: None
+    #listener = myflo.get_real_time_listener(device['macAddress'], callback, heartbeat=False)
+    listener.start()
+
+
 if __name__ == '__main__':
     import json, sys, yaml
     assert len(sys.argv) == 2, sys.argv
@@ -189,9 +210,5 @@ if __name__ == '__main__':
             id = device['id']
             dev = myflo.device(id)
             print(json.dumps(dev, indent=2))
-            lasttime = isoparse(dev['lastHeardFromTime'])
-            sd = lasttime.replace(minute=0, second=0, microsecond=0)
-            ed = sd + timedelta(minutes=5)
-            print(sd.isoformat(), ed.isoformat())
-            print(json.dumps(myflo.consumption(id, startDate=sd, endDate=ed, interval=pyflowater.INTERVAL_MINUTE), indent=2))
-            print(json.dumps(myflo.consumption(id, endDate=sd), indent=2))
+            ## print_consumption(myflo, id, dev)
+            print_callbacks(myflo, device, dev)
