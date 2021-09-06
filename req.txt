@@ -2,9 +2,12 @@
 #
 # pip install -r req.txt
 
+# google-cloud-firestore only here because of dependency bug in pyflowater==0.5.0
+
+google-cloud-firestore
 PyYAML
 prometheus_client
-pyflowater>=0.4.3
+pyflowater>=0.5
 pysolar
 python-aqi
 python-dateutil
