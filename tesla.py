@@ -134,6 +134,7 @@ class TeslaClient:
 
         def registervalue(metricname, v):
             nonlocal vehicle_awake
+            LOGGER.debug(f'observing register {metricname} with value {v}')
             if metricname == 'power' and v != 0:
                 LOGGER.debug(f'{vdata.get("display_name", "vehicle")} is awake with power {v}')
                 vehicle_awake = True
