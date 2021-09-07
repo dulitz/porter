@@ -205,7 +205,7 @@ class Porter:
                             LOGGER.critical(f'main loop now awaiting {len(poller.awaiting)} -- exiting')
                             sys.exit(255)
                         try:
-                            poller.wait()
+                            await poller.wait()
                         except Exception as exc:
                             LOGGER.critical(f'uncaught exception {exc} in main loop async task; exiting', exc_info=exc)
                             sys.exit(255)
