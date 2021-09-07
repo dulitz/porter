@@ -638,7 +638,7 @@ class NetaxsClient:
                 LOGGER.info(f'{session.uri}{vip} new card {d["name"]} swiped {time.ctime(d["when"])}')
                 last['cards'][codeint] = {
                     'card': int(d['code']),
-                    'lastname': d['lastname'],
+                    'lastname': d.get('lastname', '(none)'),
                 }
             card['last_swiped'] = d['when']
         elif 'card not found' in low: # either not found or expired
