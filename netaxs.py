@@ -113,7 +113,10 @@ class Session:
         # self.async_request = Session._Request.NONE
 
     async def async_open(self):
-        assert self.session  # must be signed in
+        if not self.session:
+            LOGGER.info('no session so cannot open websocket')
+            await asyncio.sleep(60)
+            return
         self.readlock, self.writelock = asyncio.Lock(), asyncio.Lock()
         if not self.websocket:
             LOGGER.info(f'opening websocket for {self.uri}')
