@@ -103,8 +103,7 @@ class Session:
         self.session.close()
         self.session = None
         self._cards_readahead = None
-        ### FIXME
-        ###self.async_request = Session._Request.CLOSE
+        self.async_request = Session._Request.CLOSE
 
     async def async_close(self):
         LOGGER.info(f'closing websocket for {self.uri}')
@@ -619,6 +618,9 @@ class NetaxsClient:
             return r
         last = session.last_porter
         cards = last.get('cards')
+        if not cards:
+            cards = {}
+            last['cards'] = cards
         eventid = d['id']
         last['eventid'] = max(last['eventid'], eventid)
         low = d['description'].lower()
@@ -712,7 +714,13 @@ class NetaxsClient:
             now = time.time()
             if now - last['card_timestamp'] > self.config['netaxs']['card_refetch_interval']:
                 LOGGER.debug(f'{target} updating cards and events')
-                self._update_cards(session, now)
+                try:
+                    self._update_cards(session, now)
+                except requests.exceptions.ChunkedEncodingError:
+                    # don't know why this happens, and it never seems to recover
+                    del self.targetmap[target]
+                    session.close()
+                    raise
                 self._update_events(session)
 
             gmf = makegauge('successful_io_timestamp', 'when last successful I/O occurred')
