@@ -31,19 +31,12 @@ LOGIN_ATTEMPTS = prometheus_client.Gauge('netaxs_login_attempts',
                                          ['uri'])
 LOGGER = logging.getLogger('porter.netaxs')
 
+
 class NetaxsError(Exception):
     pass
 
 
 class Session:
-    class _Request(Enum):
-        """When sync code wants async code to close or (re)open the websocket,
-        self.async_request is set to CLOSE or OPEN.
-        """
-        NONE  = 0
-        OPEN  = 1
-        CLOSE = 2
-
     def __init__(self, uri, user, password, timeout, verify=None, timezone=''):
         """The password must have already been hashed according to the NetAXS algorithm."""
         self.uri, self.user, self.password = uri, user, password
@@ -55,14 +48,15 @@ class Session:
         while self.uri.endswith('/'):
             self.uri = self.uri[:len(self.uri)-1]
         self.cv = threading.Condition()
-        self.websocket = None
-        self.async_request = Session._Request.NONE
         self.failed_fetches = 0
         self._cards_readahead = None
+        self.has_ended = False
+        self.request_reopen = False
 
     def open(self):
         if self.session:
             return
+        assert not self.has_ended  # should be no references to us if we've ended
         LOGGER.info(f'opening connection to {self.uri}')
         LOGIN_ATTEMPTS.labels(uri=self.uri).inc()
         self.failed_fetches = 0
@@ -95,7 +89,6 @@ class Session:
         pp = self.session.post(f'{self.uri}/views/home/index.lsp', data={ 'ba_username': self.user, 'ba_password': self.password }, timeout=self.timeout)
         pp.raise_for_status()
         self._debug('afterlogin', pp)
-        self.async_request = Session._Request.OPEN  # open or re-open as needed
         self._cards_readahead = None
   
     def close(self):
@@ -103,120 +96,6 @@ class Session:
         self.session.close()
         self.session = None
         self._cards_readahead = None
-        self.async_request = Session._Request.CLOSE
-
-    async def async_close(self):
-        LOGGER.info(f'closing websocket for {self.uri}')
-        await self.websocket.close()
-        self.websocket = None
-        # FIXME: commented this out to avoid race condition
-        # self.async_request = Session._Request.NONE
-
-    async def async_open(self):
-        if not self.session:
-            LOGGER.info('no session so cannot open websocket')
-            await asyncio.sleep(60)
-            return
-        self.readlock, self.writelock = asyncio.Lock(), asyncio.Lock()
-        if not self.websocket:
-            LOGGER.info(f'opening websocket for {self.uri}')
-            sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            sslcontext.load_verify_locations(self.verify)
-            self.wssuri = f'{self.uri}/views/EventHandlerIntf/'.replace('https', 'wss', 1)
-            cookies = '; '.join([f'{k}={v}' for (k, v) in self.session.cookies.items()])
-            extra_headers = { 'Cookie': cookies }
-            try:
-                self.websocket = await websockets.connect(
-                    self.wssuri, ssl=sslcontext, origin=self.uri,
-                    max_size=4096, max_queue=1024,
-                    ping_interval=None, ping_timeout=None,
-                    extra_headers=extra_headers
-                )
-            except websockets.exceptions.InvalidStatusCode:
-                LOGGER.info(f'{self.uri} rejected websocket connection; reopening')
-                self.close()
-                self.open()
-                self._cards_readahead = self.get_cards()
-                LOGGER.debug(f'{self.uri} successfully fetched readahead')
-                # we will attempt to reopen the websocket again next time
-            # FIXME: race condition here, where close() and open() may be called
-            # on the session while we are still connecting in the line above, but
-            # then we overwrite the new OPEN request in the line below
-            self.async_request = Session._Request.NONE
-
-    async def handle_async_request(self):
-        assert self.websocket  # must have called async_open()
-        if self.async_request == Session._Request.OPEN:
-            if self.websocket:
-                await self.async_close()
-            await self.async_open()
-        elif self.async_request == Session._Request.CLOSE:
-            if self.websocket:
-                await self.async_close()
-
-    async def write_message(self, message):
-        assert self.websocket  # must call async_open() first
-        await self.handle_async_request()
-        LOGGER.debug(f'sending {message} on {self.wssuri}')
-        async with self.writelock:
-            return await self.websocket.send(message)
-
-    async def read_event(self):
-        if not self.websocket:
-            await self.async_open()
-        else:
-            await self.handle_async_request()
-        if not self.websocket:
-            return  # catch it next time
-        async with self.readlock:
-            async for message in self.websocket:
-                js = json.loads(message.replace("'", '"'))
-                if len(js) == 2:
-                    if js[0] == 'setCid':
-                        cid = int(js[1])
-                        LOGGER.debug(f'onConnect.cid={cid}')
-                        await self.write_message('luaNS4Client2ServerIntf;setIOState;dddd;1;1;0;1;;')
-                        continue
-                elif len(js) == 4:
-                    if js[0] == 'ud' and js[1] == 'luaNS4Server2ClientIntf':
-                        if js[2] == 'asyncLogoff' and len(js[3]) == 1:
-                            logoff_minutes = js[3][0]
-                            return { js[2]: logoff_minutes }
-                        elif js[2] == 'asyncSetIOState':
-                            # js[3] [1,26,1,1,0]
-                            return { js[2]: js[3] }
-                        elif js[2] == 'asyncSendNewEvent':
-                            (panel, datestr, evid, device, zero, logical, physical, typeint, code, site, lastname, secondzero, last) = js[3]
-                            ts = self._localize(datetime.strptime(datestr.replace('\\/', '/').strip(), '%m/%d/%Y %H:%M:%S')).timestamp()
-                            desc = ''
-                            if typeint == 1: # and subtypeint == 0
-                                if int(code) and site:
-                                    desc = 'Card Found'
-                            elif typeint == 2: # and subtypeint == 1:
-                                if site == 0:
-                                    desc = 'Card Not Found'
-                            elif typeint == 5:
-                                desc = 'Timezone Violation'
-                            elif typeint == 12: # and subtypeint == 0:
-                                desc = 'VIP Card Found'
-                            elif typeint == 11: # and subtypeint == 1:
-                                desc = 'Card Not Found: expired'
-                            if not desc:
-                                LOGGER.error(f'unknown event {js[3]}')
-                                desc = 'unknown event'
-                            return { js[2]: {
-                                'id': int(evid),
-                                'panel': panel,
-                                'when': ts,
-                                'reader': device,
-                                'logical': int(logical),
-                                'physical': int(physical),
-                                'description': desc,
-                                'code': code,
-                                'site': site,
-                                'name': lastname,
-                            } }
-                LOGGER.warning(f'unknown message from {self.wssuri}: {js}')
 
     def get_events(self, panel=1, start=0, notbefore=0):
         self._set_headers()
@@ -532,7 +411,8 @@ class NetaxsClient:
                     s.last_porter['cardfound'][vip][lnpn] = 0
                     s.last_porter['cardnotfound'][lnpn] = 0
                     s.last_porter['timezone'][lnpn] = 0
-            self.awaitables.add(self._coro_for_session(target, s, must_open=True))
+            ws = Websocket(self, s)
+            self.awaitables.add(asyncio.create_task(ws._coro_for_session()))
             self.targetmap[target] = s
             self.targeteventbusmap[s.uri] = self.eventbus.target(target)
         return s
@@ -551,46 +431,6 @@ class NetaxsClient:
                     session.open()
                 if tries == 0:
                     raise
-
-    async def _coro_for_session(self, target, session, must_open=False):
-        """Awaits asynchronous messages for session. When one arrives it is processed.
-        If must_open is true, it calls async_open() first.
-        """
-        try:
-            if must_open:
-                await session.async_open()
-            try:
-                #ev = await session.read_event()
-                ev = await asyncio.wait_for(session.read_event(), timeout=120)
-            except asyncio.TimeoutError:
-                LOGGER.info(f'{session.uri}: timeout reading websocket')
-                self.async_request = Session._Request.OPEN  # re-open
-                await asyncio.sleep(2)  # rate limiting
-                return self._coro_for_session(target, session)
-            except websockets.exceptions.ConnectionClosedError:
-                session.websocket = None
-                # schedule ourselves to run again
-                return self._coro_for_session(target, session, must_open=True)
-            last = session.last_porter
-            last['successful_io_timestamp'] = max(time.time(), last['successful_io_timestamp'])
-            logoff_minutes = (ev or {}).get('asyncLogoff')
-            if logoff_minutes is not None:
-                LOGGER.debug(f'{session.uri}: asyncLogoff in {logoff_minutes} min')
-                if logoff_minutes < 2:
-                    with session.cv:
-                        LOGGER.debug(f'{session.uri}: updating cards for keepalive')
-                        self._update_cards(session, time.time())
-            newevent = (ev or {}).get('asyncSendNewEvent')
-            if newevent:
-                LOGGER.debug(f'{session.uri}: new async event {newevent}')
-                with self.cv:
-                    self._update_one_event(session, newevent)
-        except Exception as ex:
-            LOGGER.error(f'{session.uri}: error reading websocket', exc_info=ex)
-            await asyncio.sleep(1) # rate limiting
-            # FIXME: if this happens repeatedly we should try to reconnect
-        # schedule ourselves to run again
-        return self._coro_for_session(target, session)
 
     async def poll(self):
         """Awaits events from each active Session. When one comes in, we update
@@ -639,13 +479,13 @@ class NetaxsClient:
             vip = ' VIP' if 'vip' in low else ''
             if card:
                 LOGGER.info(f'{session.uri}{vip} {d["name"]} swiped {time.ctime(d["when"])}, previous {time.ctime(card["last_swiped"])}')
+                card['last_swiped'] = d['when']
             else:
                 LOGGER.info(f'{session.uri}{vip} new card {d["name"]} swiped {time.ctime(d["when"])}')
                 last['cards'][codeint] = {
                     'card': int(d['code']),
                     'lastname': d.get('lastname', '(none)'),
                 }
-            card['last_swiped'] = d['when']
         elif 'card not found' in low: # either not found or expired
             eventbus.propagate((d.get('name', ''), d['description'], plp))
             self._increment(last['cardnotfound'], lp)
@@ -715,6 +555,10 @@ class NetaxsClient:
         with session.cv:
             last = session.last_porter
             now = time.time()
+            if self.request_reopen:
+                self.request_reopen = False
+                self.close()
+                self.open()
             if now - last['card_timestamp'] > self.config['netaxs']['card_refetch_interval']:
                 LOGGER.debug(f'{target} updating cards and events')
                 try:
@@ -722,6 +566,7 @@ class NetaxsClient:
                 except requests.exceptions.ChunkedEncodingError:
                     # don't know why this happens, and it never seems to recover
                     del self.targetmap[target]
+                    session.has_ended = True
                     session.close()
                     raise
                 self._update_events(session)
@@ -794,6 +639,154 @@ class NetaxsClient:
         return [g for g in metric_to_gauge.values()] + [cmf_accepted, cmf_rejected, cmf_dbupdates, cmf_unknown, cmf_tamper]
 
 
+class Websocket:
+    def __init__(self, client, session):
+        self.client = client
+        self.session = session
+        self.uri = session.uri
+        self.wssuri = f'{self.uri}/views/EventHandlerIntf/'.replace('https', 'wss', 1)
+        self.websocket = None
+
+    async def async_close(self):
+        if self.websocket:
+            LOGGER.info(f'closing websocket for {self.uri}')
+            await self.websocket.close()
+            self.websocket = None
+
+    async def async_open(self):
+        if self.websocket:
+            return
+        self.readlock, self.writelock = asyncio.Lock(), asyncio.Lock()
+        LOGGER.info(f'opening websocket for {self.uri}')
+        sslcontext = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        sslcontext.load_verify_locations(self.session.verify)
+        cookies = '; '.join([f'{k}={v}' for (k, v) in self.session.session.cookies.items()])
+        extra_headers = { 'Cookie': cookies }
+        try:
+            self.websocket = await websockets.connect(
+                self.wssuri, ssl=sslcontext, origin=self.uri,
+                max_size=4096, max_queue=1024,
+                ping_interval=None, ping_timeout=None,
+                extra_headers=extra_headers
+            )
+        except websockets.exceptions.InvalidStatusCode:
+            LOGGER.info(f'{self.uri} rejected websocket connection; reopening underlying session')
+            self.session.request_reopen = True
+
+    async def write_message(self, message):
+        assert self.websocket  # must call async_open() first
+        LOGGER.debug(f'sending {message} on {self.wssuri}')
+        async with self.writelock:
+            return await self.websocket.send(message)
+
+    async def read_event(self):
+        assert self.websocket
+        async with self.readlock:
+            async for message in self.websocket:
+                js = json.loads(message.replace("'", '"'))
+                if len(js) == 2:
+                    if js[0] == 'setCid':
+                        cid = int(js[1])
+                        LOGGER.debug(f'onConnect.cid={cid}')
+                        await self.write_message('luaNS4Client2ServerIntf;setIOState;dddd;1;1;0;1;;')
+                        continue
+                elif len(js) == 4:
+                    if js[0] == 'ud' and js[1] == 'luaNS4Server2ClientIntf':
+                        if js[2] == 'asyncLogoff' and len(js[3]) == 1:
+                            logoff_minutes = js[3][0]
+                            return { js[2]: logoff_minutes }
+                        elif js[2] == 'asyncSetIOState':
+                            # js[3] [1,26,1,1,0]
+                            return { js[2]: js[3] }
+                        elif js[2] == 'asyncSendNewEvent':
+                            (panel, datestr, evid, device, zero, logical, physical, typeint, code, site, lastname, secondzero, last) = js[3]
+                            ts = self.session._localize(datetime.strptime(datestr.replace('\\/', '/').strip(), '%m/%d/%Y %H:%M:%S')).timestamp()
+                            desc = ''
+                            if typeint == 1: # and subtypeint == 0
+                                if int(code) and site:
+                                    desc = 'Card Found'
+                            elif typeint == 2: # and subtypeint == 1:
+                                if site == 0:
+                                    desc = 'Card Not Found'
+                            elif typeint == 5:
+                                desc = 'Timezone Violation'
+                            elif typeint == 12: # and subtypeint == 0:
+                                desc = 'VIP Card Found'
+                            elif typeint == 11: # and subtypeint == 1:
+                                desc = 'Card Not Found: expired'
+                            if not desc:
+                                LOGGER.error(f'unknown event {js[3]}')
+                                desc = 'unknown event'
+                            return { js[2]: {
+                                'id': int(evid),
+                                'panel': panel,
+                                'when': ts,
+                                'reader': device,
+                                'logical': int(logical),
+                                'physical': int(physical),
+                                'description': desc,
+                                'code': code,
+                                'site': site,
+                                'name': lastname,
+                            } }
+                LOGGER.warning(f'unknown message from {self.wssuri}: {js}')
+
+    def process_event(self, ev):
+        logoff_minutes = (ev or {}).get('asyncLogoff')
+        if logoff_minutes is not None:
+            LOGGER.debug(f'{self.uri}: asyncLogoff in {logoff_minutes} min')
+            if logoff_minutes < 2:
+                LOGGER.debug(f'{self.uri}: updating cards for keepalive')
+                with self.session.cv:
+                    self.client._update_cards(self.session, time.time())
+        newevent = (ev or {}).get('asyncSendNewEvent')
+        if newevent:
+            LOGGER.debug(f'{self.uri}: new async event {newevent}')
+            with self.client.cv:
+                self.client._update_one_event(self.session, newevent)
+
+    async def _coro_for_session(self):
+        """Runs as a task and awaits asynchronous messages for self.session.
+        When one arrives it is processed. At entry, self.session has
+        been opened but the websocket has not. Loops until
+        self.session is no longer the open session for target, at
+        which time we exit and return None (no next task).
+
+        When the underlying session is reopened we will presumably get an error
+        at some point and will then attempt to reopen the websocket in the new
+        underlying session.
+        """
+        if self.session.has_ended:
+            self.session = None
+            return None
+        await self.async_open()
+
+        while not self.session.has_ended:
+            try:
+                ev = await asyncio.wait_for(self.read_event(), timeout=120)
+                last = self.session.last_porter
+                last['successful_io_timestamp'] = max(
+                    time.time(), last['successful_io_timestamp']
+                )
+                self.process_event(ev)
+            except asyncio.TimeoutError:
+                LOGGER.info(f'{self.uri}: timeout reading websocket')
+                await self.async_close()
+                await asyncio.sleep(2)  # rate limiting
+                return self._coro_for_session()  # reopen
+            except websockets.exceptions.ConnectionClosedError:
+                self.websocket = None
+                return self._coro_for_session()  # reopen
+            except Exception as ex:
+                LOGGER.error(f'{self.uri}: error reading websocket', exc_info=ex)
+                await asyncio.sleep(1) # rate limiting
+                # FIXME: if this happens repeatedly we should try to reconnect
+        assert self.session.has_ended
+        self.session = None  # make it easier on the garbage collector
+        await self.async_close()
+        return None  # the new session will have started a new Websocket task
+
+
 class EventbusStub:
     def __init__(self):
         pass
@@ -801,6 +794,9 @@ class EventbusStub:
         pass
     def add_awaitables_to(self, otherset):
         pass
+    def target(self, t):
+        return self
+
 
 if __name__ == '__main__':
     import json, sys, yaml
@@ -822,9 +818,11 @@ if __name__ == '__main__':
 
     if True:
         LOGGER.setLevel(logging.DEBUG)
-        session = client._get_session(target)
-        while True:
-            print(asyncio.run(session.read_event()))
+        async def runit():
+            session = client._get_session(target)
+            while True:
+                await asyncio.sleep(60)
+        asyncio.run(runit())
 
     while True:
         i = client.collect(target)
