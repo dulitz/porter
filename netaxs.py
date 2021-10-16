@@ -557,10 +557,10 @@ class NetaxsClient:
         with session.cv:
             last = session.last_porter
             now = time.time()
-            if self.request_reopen:
-                self.request_reopen = False
-                self.close()
-                self.open()
+            if session.request_reopen:
+                session.request_reopen = False
+                session.close()
+                session.open()
             if now - last['card_timestamp'] > self.config['netaxs']['card_refetch_interval']:
                 LOGGER.debug(f'{target} updating cards and events')
                 try:
