@@ -412,7 +412,9 @@ class NetaxsClient:
                     s.last_porter['cardnotfound'][lnpn] = 0
                     s.last_porter['timezone'][lnpn] = 0
             ws = Websocket(self, s)
-            self.awaitables.add(asyncio.create_task(ws._coro_for_session()))
+            #### this fails because there is no running event loop in this thread
+            #### self.awaitables.add(asyncio.create_task(ws._coro_for_session()))
+            self.awaitables.add(ws._coro_for_session())
             self.targetmap[target] = s
             self.targeteventbusmap[s.uri] = self.eventbus.target(target)
         return s
