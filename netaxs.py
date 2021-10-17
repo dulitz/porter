@@ -353,7 +353,7 @@ class NetaxsClient:
         if not myconfig:
             raise Exception('no netaxs configuration')
         if not myconfig.get('timeout'):
-            myconfig['timeout'] = 20
+            myconfig['timeout'] = 40
         if not myconfig.get('card_refetch_interval'):
             myconfig['card_refetch_interval'] = 0
 
